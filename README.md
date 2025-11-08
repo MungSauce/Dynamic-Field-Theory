@@ -31,6 +31,6 @@ The Quantum Measurement Problem is resolved by defining wave function collapse a
 
 We urge physicists, engineers, and mathematicians to begin the independent verification of the beta multiplied by kappa_grav equals 1 identity and the subsequent strong-field predictions without delay.
 
-4.Donation Policy: 
+4. Donation Policy: 
 This knowledge is provided freely for the benefit of all humanity. If you find this Unified Theory valuable, and wish to support the originator of this work, a donation channel is provided below.
 w3513yb4rn3tt@gmail.com
