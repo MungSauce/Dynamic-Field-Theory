@@ -1,4 +1,5 @@
 Dynamic Field Theory (DFT): The Unified Field Solution
+
 This repository hosts the documentation for Dynamic Field Theory (DFT), a complete Unified Field Theory that resolves the structural incompatibilities between General Relativity (GR) and the Standard Model of Particle Physics (SM).This work is released under a Copyleft/Open Source license to ensure universal access, rapid verification, and collaborative advancement.
 
 1. The Core Mathematical Resolution:
