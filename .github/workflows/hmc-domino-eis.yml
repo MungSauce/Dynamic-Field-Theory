@@ -59,16 +59,23 @@ jobs:
 
       - name: Sweep EIS on 10 MB HMC carrier
         run: |
-          set -euxo pipefail
-          python3 hmc/hmc_eis_bridge.py src10 src10.best.hcd ./hmc_domino_v4 \
-            --sr 48000 --block 64 --carriers 31 --bits-axis 12 --sample-bits 16 --drive 1.4 \
-            --out-prefix eis_48k16_a12 | tee eis_48k16_a12.json
-          python3 hmc/hmc_eis_bridge.py src10 src10.best.hcd ./hmc_domino_v4 \
-            --sr 48000 --block 64 --carriers 31 --bits-axis 21 --sample-bits 24 --drive 1.4 \
-            --out-prefix eis_48k24_a21 | tee eis_48k24_a21.json
-          python3 hmc/hmc_eis_bridge.py src10 src10.best.hcd ./hmc_domino_v4 \
-            --sr 96000 --block 64 --carriers 31 --bits-axis 21 --sample-bits 24 --drive 1.4 \
-            --out-prefix eis_96k24_a21 | tee eis_96k24_a21.json
+          set -uxo pipefail
+          : > eis_sweep_status.tsv
+          printf "sample_bits\tbits_axis\trc\n" >> eis_sweep_status.tsv
+          for SPEC in "16 11" "16 12" "16 13" "16 14" "24 16" "24 18" "24 19" "24 20" "24 21"; do
+            set -- $SPEC
+            SB=$1
+            BA=$2
+            OUT="eis_48k_${SB}_a${BA}"
+            set +e
+            python3 hmc/hmc_eis_bridge.py src10 src10.best.hcd ./hmc_domino_v4 \
+              --sr 48000 --block 64 --carriers 31 --bits-axis "$BA" --sample-bits "$SB" --drive 1.4 \
+              --out-prefix "$OUT" > "$OUT.json"
+            RC=$?
+            set -e
+            printf "%s\t%s\t%s\n" "$SB" "$BA" "$RC" >> eis_sweep_status.tsv
+          done
+          cat eis_sweep_status.tsv
 
       - name: Select EIS configuration
         run: |
