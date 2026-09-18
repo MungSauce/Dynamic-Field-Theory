@@ -1,0 +1,37 @@
+name: Epsilon V7 enwik9 corpus gate
+
+on:
+  push:
+    branches:
+      - epsilon-v7-enwik9-execution-20260917
+  workflow_dispatch:
+
+jobs:
+  corpus-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout canonical enwik9 Git LFS mirror
+        uses: actions/checkout@v4
+        with:
+          repository: amkillam/compression-test-data
+          path: corpus_repo
+          lfs: true
+          fetch-depth: 1
+      - name: Verify canonical corpus
+        run: |
+          set -euxo pipefail
+          cp corpus_repo/enwik/enwik9 enwik9
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "e206c3450ac99950df65bf70ef61a12d  enwik9" | md5sum -c -
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+          {
+            echo "CANONICAL_ENWIK9=PASS"
+            echo "BYTES=$(stat -c%s enwik9)"
+            sha256sum enwik9
+          } | tee CORPUS_GATE_RESULT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: epsilon-enwik9-corpus-gate
+          path: CORPUS_GATE_RESULT.txt
