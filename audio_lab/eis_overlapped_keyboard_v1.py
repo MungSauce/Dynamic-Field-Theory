@@ -136,3 +136,5 @@ def run(symbols=12000, seed=42):
 if __name__=="__main__":
     ap=argparse.ArgumentParser();ap.add_argument("--symbols",type=int,default=12000);a=ap.parse_args()
     print(json.dumps(run(a.symbols),indent=2))
+
+# CANONICAL REPLICATION NOTICE (2026-09-18): predecessor/lineage artifact. Current protocol: compression/EIS_K32_FORMAL_REPLICATION_V1.md

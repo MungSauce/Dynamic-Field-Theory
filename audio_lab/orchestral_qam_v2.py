@@ -140,3 +140,5 @@ def main():
     raise SystemExit(0 if exact and result["flac_pcm_exact"] else 3)
 
 if __name__=="__main__": main()
+
+# CANONICAL REPLICATION NOTICE (2026-09-18): predecessor/lineage artifact. Current protocol: compression/EIS_K32_FORMAL_REPLICATION_V1.md

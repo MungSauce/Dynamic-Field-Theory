@@ -36,3 +36,8 @@ Interpretation:
 - V2 should increase conditional relational expressivity per retained carrier without increasing the 50 MB source-dependent ceiling.
 
 Workflow run: 35303727964
+
+
+---
+
+> **Canonical replication notice (2026-09-18):** This is predecessor/lineage material. Current protocol: [EIS-K32 Formal Replication v1.0](../compression/EIS_K32_FORMAL_REPLICATION_V1.md).
