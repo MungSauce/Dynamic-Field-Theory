@@ -17,8 +17,8 @@ def next_prime_at_least(n:int)->int:
     return x
 
 def require_instruments(n:int)->None:
-    if n<16 or n>4096 or (n & (n-1)):
-        raise ValueError("instrument count must be a power of two in [16,4096]")
+    if n<1 or n>4096 or (n & (n-1)):
+        raise ValueError("instrument count must be a power of two in [1,4096]")
 
 def fwht_rows(a:np.ndarray, modulus:int)->np.ndarray:
     if a.ndim!=2: raise ValueError("expected 2D array")
