@@ -16,7 +16,7 @@ VERSION=1
 MAX_ALPHABET=206
 MAX_DIRECTIONAL_NOTES=412
 BLOCK_FRAMES=32
-HEADER_SIZE=176
+HEADER_SIZE=168
 # magic,ver,hdr,flags,N,A,dir_notes,block_frames,n,frames,payload,
 # source_sha,payload_sha,crc,reserved
 HEADER=struct.Struct("<8sHHIHHHHQQQ32s32sI52s")
@@ -51,26 +51,22 @@ def frame_count(n,N):
     return max(((page_bounds(n,N,i)[1]-page_bounds(n,N,i)[0]+1)//2) for i in range(N))
 
 def _mix(v,m):
-    """Deterministic invertible butterfly. det([[1,1],[1,2]])=1."""
-    y=list(v); span=1
-    while span<len(y):
-        for i in range(0,len(y),2*span):
-            for j in range(i,i+span):
-                a,b=y[j],y[j+span]
-                y[j]=(a+b)%m
-                y[j+span]=(a+2*b)%m
-        span*=2
+    """O(N) reversible cumulative field mixer.
+
+    Each stored coordinate after the first depends on all preceding modified
+    instrument states, so the payload is not laid out as recognizable lanes.
+    """
+    y=[]; acc=0
+    for x in v:
+        acc=(acc+x)%m
+        y.append(acc)
     return y
 
 def _unmix(v,m):
-    y=list(v); span=len(y)//2
-    while span:
-        for i in range(0,len(y),2*span):
-            for j in range(i,i+span):
-                u,w=y[j],y[j+span]
-                y[j]=(2*u-w)%m
-                y[j+span]=(w-u)%m
-        span//=2
+    y=[0]*len(v); prev=0
+    for i,x in enumerate(v):
+        y[i]=(x-prev)%m
+        prev=x
     return y
 
 def _modifier(i,m):
