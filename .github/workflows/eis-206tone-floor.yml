@@ -1,0 +1,62 @@
+name: EIS 206-tone floor
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-eis-206tone-20260918
+    paths:
+      - 'audio_lab/eis_206tone_capacity_v2.py'
+      - '.github/workflows/eis-206tone-floor.yml'
+
+jobs:
+  floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install numpy
+        run: python3 -m pip install --quiet numpy
+      - name: Run capacity sweep
+        run: |
+          python3 audio_lab/eis_206tone_capacity_v2.py | tee EIS_206TONE_FLOOR_RAW.json
+      - name: Build floor report
+        run: |
+          python3 - <<'PY' | tee EIS_206TONE_FLOOR_RESULT.json
+          import json, math, os
+          d=json.load(open("EIS_206TONE_FLOOR_RAW.json"))
+          one8=d["best_exact_8bit"]
+          one16=d["best_exact_16bit"]
+          ctrl=d["independent_206_onoff_control"]
+          N=1_000_000_000
+          # For 206 fixed, independently frequency-selective real carriers,
+          # the shortest real DFT frame with 206 nonnegative-frequency bins
+          # is 412 samples (bins 1..206, including Nyquist).
+          strict_samples=412
+          out={
+            "positions":N,
+            "template_classifier_floor":{
+              "note":"Phase-reset matched-template identity; exact in synthetic sweep, but not 206 narrow frequency-isolated channels.",
+              "8bit_samples_per_position":one8["samples_per_position"],
+              "8bit_projected_wav_bytes":44 + N*one8["samples_per_position"],
+              "16bit_samples_per_position":one16["samples_per_position"],
+              "16bit_projected_wav_bytes":44 + N*one16["samples_per_position"]*2
+            },
+            "strict_frequency_isolation_floor":{
+              "note":"206 fixed frequency bins individually isolatable by an orthogonal real filter/DFT bank.",
+              "samples_per_position":strict_samples,
+              "8bit_projected_wav_bytes":44 + N*strict_samples,
+              "16bit_projected_wav_bytes":44 + N*strict_samples*2,
+              "48k_frame_ms":strict_samples/48000*1000,
+              "48k_positions_per_second":48000/strict_samples
+            },
+            "arbitrary_parallel_onoff_control":ctrl,
+            "conclusion":"Frequency multiplexing removes the need for 206 separate files, but with one independent page decision per corpus position, the time-bandwidth product prevents a storage reduction below the serialized source by overlap alone."
+          }
+          print(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eis-206tone-floor
+          path: |
+            EIS_206TONE_FLOOR_RAW.json
+            EIS_206TONE_FLOOR_RESULT.json
