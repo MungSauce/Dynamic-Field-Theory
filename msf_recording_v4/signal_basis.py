@@ -28,6 +28,5 @@ def remove_modifier(y,i,B):
     return (y-modifier_offset(i,B))%B
 
 def sample_bytes_for(B,N):
-    # One scalar recording sample must span the entire simultaneous basis.
-    bits=math.ceil(N*math.log2(B))
-    return (bits+7)//8
+    # Exact serialized width of one scalar composite sample.
+    return ((pow(B,N)-1).bit_length()+7)//8
