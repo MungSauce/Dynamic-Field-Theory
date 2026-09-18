@@ -43,7 +43,7 @@ def trial(samples,bits,nsyms=200000,seed=12345):
         # squared Euclidean nearest-template
         # chunk to avoid large temporary matrices
         for r in block:
-            dist=np.sum((q-r)**2,axis=1,dtype=np.int64)
+            delta=q.astype(np.int64)-r.astype(np.int64)\n            dist=np.sum(delta*delta,axis=1,dtype=np.int64)
             rec.append(int(np.argmin(dist)))
     rec=np.asarray(rec,dtype=np.int16)
     exact=bool(np.array_equal(ids,rec))
