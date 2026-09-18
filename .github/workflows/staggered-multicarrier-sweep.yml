@@ -1,0 +1,173 @@
+name: Staggered multicarrier MP3 exactness sweep
+
+on:
+  push:
+    branches:
+      - hutter-target-apc-bot-20260917
+    paths:
+      - 'audio_lab/staggered_multicarrier_v1.py'
+      - '.github/workflows/staggered-multicarrier-sweep.yml'
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    name: p\${{ matrix.period }}-g\${{ matrix.guard }}-b\${{ matrix.br }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        period: [4, 6, 8]
+        guard: [0.5, 1.0, 1.5]
+        br: [64, 96, 128, 192]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg unzip curl
+
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+
+      - name: Run staggered modem probe
+        run: |
+          set +e
+          python3 audio_lab/staggered_multicarrier_v1.py enwik9 \
+            --prefix 4096 \
+            --sr 48000 \
+            --period-ms "\${{ matrix.period }}" \
+            --guard-ms "\${{ matrix.guard }}" \
+            --bitrate "\${{ matrix.br }}" \
+            --out-prefix probe > result.json 2>stderr.txt
+          rc=$?
+          echo "$rc" > exit_code.txt
+          cat result.json || true
+          cat stderr.txt || true
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stagger-p\${{ matrix.period }}-g\${{ matrix.guard }}-b\${{ matrix.br }}
+          path: |
+            result.json
+            stderr.txt
+            exit_code.txt
+          if-no-files-found: error
+
+  select:
+    name: Select fastest zero-error configuration
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: stagger-*
+          path: results
+
+      - name: Summarize
+        run: |
+          python3 - <<'PY' | tee STAGGERED_MULTICARRIER_SWEEP_RESULT.json
+          from pathlib import Path
+          import json
+          rows=[]
+          for p in Path('results').rglob('result.json'):
+              try:
+                  d=json.loads(p.read_text())
+              except Exception:
+                  continue
+              rows.append(d)
+          exact=[r for r in rows if r.get('exact') is True]
+          exact.sort(key=lambda r:(-r['nominal_payload_bps'], r['bitrate_kbps'], r['guard_ms']))
+          out={
+              'tested':len(rows),
+              'exact_count':len(exact),
+              'best_exact':exact[0] if exact else None,
+              'exact_configs':[
+                  {
+                      'period_ms':r['period_ms'],
+                      'guard_ms':r['guard_ms'],
+                      'bitrate_kbps':r['bitrate_kbps'],
+                      'nominal_payload_bps':r['nominal_payload_bps'],
+                      'errors':r['errors'],
+                      'full_enwik9_mp3_MB_est':r['full_enwik9_mp3_MB_est'],
+                      'min_margin':r['decoder_diagnostics']['min_margin']
+                  } for r in exact
+              ]
+          }
+          print(json.dumps(out,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staggered-multicarrier-sweep-result
+          path: STAGGERED_MULTICARRIER_SWEEP_RESULT.json
+
+  promote:
+    name: Promote best exact to 1 MiB
+    needs: select
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: staggered-multicarrier-sweep-result
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg unzip curl
+      - name: Read winning configuration
+        id: cfg
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          d=json.load(open('STAGGERED_MULTICARRIER_SWEEP_RESULT.json'))
+          b=d.get('best_exact')
+          if not b:
+              print('has_best=false')
+          else:
+              print('has_best=true')
+              print('period='+str(b['period_ms']))
+              print('guard='+str(b['guard_ms']))
+              print('br='+str(b['bitrate_kbps']))
+          PY
+      - name: Fetch canonical enwik9
+        if: steps.cfg.outputs.has_best == 'true'
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: 1 MiB exactness promotion
+        if: steps.cfg.outputs.has_best == 'true'
+        run: |
+          set +e
+          python3 audio_lab/staggered_multicarrier_v1.py enwik9 \
+            --prefix 1048576 \
+            --sr 48000 \
+            --period-ms "\${{ steps.cfg.outputs.period }}" \
+            --guard-ms "\${{ steps.cfg.outputs.guard }}" \
+            --bitrate "\${{ steps.cfg.outputs.br }}" \
+            --out-prefix promoted > promoted_result.json 2>promoted_stderr.txt
+          rc=$?
+          echo "$rc" > promoted_exit_code.txt
+          cat promoted_result.json || true
+          cat promoted_stderr.txt || true
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: staggered-multicarrier-promoted-1MiB
+          path: |
+            promoted_result.json
+            promoted_stderr.txt
+            promoted_exit_code.txt
+          if-no-files-found: ignore
