@@ -1,0 +1,94 @@
+name: TRUECSS original composite 100MB probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download canonical enwik9 and extract first 100MB
+        run: |
+          curl -L --fail --retry 4 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          python3 - <<'PY'
+          import hashlib,zipfile
+          with zipfile.ZipFile('enwik9.zip') as z,z.open('enwik9') as src,open('enwik100m','wb') as out:
+              left=100_000_000
+              h=hashlib.sha256()
+              while left:
+                  b=src.read(min(8<<20,left))
+                  if not b: raise SystemExit("unexpected EOF")
+                  out.write(b); h.update(b); left-=len(b)
+          print("source_sha256="+h.hexdigest())
+          PY
+          test "$(stat -c%s enwik100m)" = "100000000"
+
+      - name: Build continuity-preserving composite
+        run: g++ -O3 -std=c++17 experiments/truecss_original_composite_v1.cpp -o truecss_original_composite
+
+      - name: Train fixed one-million-node substrate
+        id: train
+        run: |
+          set +e
+          ./truecss_original_composite train enwik100m truecss_original_composite.state 100000000 | tee train.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Cold replay if substrate survived
+        if: steps.train.outputs.rc == '0'
+        run: |
+          rm enwik100m
+          ./truecss_original_composite replay truecss_original_composite.state recovered.bin | tee replay.log
+          test "$(stat -c%s recovered.bin)" = "100000000"
+
+      - name: Record measured result
+        run: |
+          python3 - <<'PY'
+          import json,os,re
+          text=open("train.log").read()
+          def grab(k):
+              m=re.search(r"(?:^|\s)"+re.escape(k)+r"=([^\s]+)",text)
+              return m.group(1) if m else None
+          r={
+            "architecture":"TRUECSS original physical-node composite V1",
+            "source_bytes_requested":100_000_000,
+            "physical_nodes":1_000_000,
+            "node_width_bytes":1,
+            "page_bytes":1_000_000,
+            "page_bank_bytes":0,
+            "residual_bytes":0,
+            "correction_bytes":0,
+            "optimization_target":"settling/binding law only",
+            "train_status":grab("status"),
+            "bytes_imprinted":int(grab("bytes_imprinted") or 0),
+            "failure_page":int(grab("page") or 0) if grab("status")=="RELATIONAL_CONTRADICTION" else None,
+            "failure_key":int(grab("key") or 0) if grab("status")=="RELATIONAL_CONTRADICTION" else None,
+            "terminals_seen":int(grab("terminals_seen") or 0),
+            "frozen_state_bytes":int(grab("frozen_state_bytes") or 0),
+            "prefreeze_replay":grab("prefreeze_replay"),
+            "cold_replay_attempted":os.path.exists("replay.log"),
+          }
+          if os.path.exists("replay.log"):
+              rt=open("replay.log").read()
+              r["cold_replay_pass"]="status=REPLAY_PASS" in rt
+              m=re.search(r"recovered_bytes=(\d+)",rt);r["recovered_bytes"]=int(m.group(1)) if m else None
+          else:
+              r["cold_replay_pass"]=False
+          r["status"]="PASS" if r["cold_replay_pass"] else ("FALSIFIED_AT_RELATION_LAW" if r["train_status"]=="RELATIONAL_CONTRADICTION" else "FAIL")
+          open("truecss_original_composite_100mb_report.json","w").write(json.dumps(r,indent=2)+"\n")
+          print(json.dumps(r,indent=2))
+          PY
+
+      - name: Publish report
+        uses: actions/upload-artifact@v4
+        with:
+          name: truecss-original-composite-100mb-report
+          path: |
+            truecss_original_composite_100mb_report.json
+            train.log
+            replay.log
+          if-no-files-found: warn
