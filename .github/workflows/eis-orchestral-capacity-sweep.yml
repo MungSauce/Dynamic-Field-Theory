@@ -1,0 +1,84 @@
+name: EIS orchestral-state capacity sweep
+
+on:
+  push:
+    branches:
+      - eis-r-residual-20260918
+    paths:
+      - 'audio_lab/orchestral_state_v1.py'
+      - '.github/workflows/eis-orchestral-capacity-sweep.yml'
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flac curl unzip
+          python3 -m pip install --quiet numpy
+      - name: Build deterministic high-entropy control
+        run: |
+          python3 - <<'PY'
+          import numpy as np
+          rng=np.random.default_rng(20260918)
+          open('entropy.bin','wb').write(rng.integers(0,256,size=262144,dtype=np.uint8).tobytes())
+          PY
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Run capacity boundary sweep
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, pathlib
+          configs=[
+            (48,23,8192,1),
+            (48,23,16384,1),
+            (48,23,32768,1),
+            (40,19,16384,1),
+            (32,15,16384,1),
+            (64,31,8192,1),
+            (48,23,16384,2),
+          ]
+          sources=[('entropy.bin',262144),('enwik9',262144)]
+          rows=[]
+          for source,prefix in sources:
+            for block,carriers,order,channels in configs:
+              tag=f"{pathlib.Path(source).stem}-b{block}-c{carriers}-m{order}-ch{channels}"
+              cmd=['python3','audio_lab/orchestral_state_v1.py',source,'--prefix',str(prefix),
+                   '--block',str(block),'--carriers',str(carriers),'--order',str(order),
+                   '--channels',str(channels),'--out-prefix',tag]
+              p=subprocess.run(cmd,text=True,capture_output=True)
+              try: d=json.loads(p.stdout)
+              except Exception:
+                d={'parse_error':p.stdout[-1000:],'stderr':p.stderr[-1000:]}
+              d['tag']=tag; d['exit_code']=p.returncode
+              rows.append(d)
+              pathlib.Path(tag+'.json').write_text(json.dumps(d,indent=2))
+          pathlib.Path('ORCHESTRAL_SWEEP.json').write_text(json.dumps(rows,indent=2))
+          exact=[r for r in rows if r.get('exact') and r.get('flac_pcm_exact')]
+          exact.sort(key=lambda r:r.get('payload_bps',0),reverse=True)
+          summary={
+            'tested':len(rows),
+            'exact_count':len(exact),
+            'best_exact':exact[:10],
+            'policy':'capacity requires byte-exact source recovery; FLAC must reproduce PCM exactly; all byte sizes retained'
+          }
+          pathlib.Path('ORCHESTRAL_SWEEP_SUMMARY.json').write_text(json.dumps(summary,indent=2))
+          print(json.dumps(summary,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eis-orchestral-capacity-sweep
+          path: |
+            *.json
+            *.wav.xz
+            *.flac
