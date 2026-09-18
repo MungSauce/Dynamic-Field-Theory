@@ -1,0 +1,69 @@
+name: HMC reverse complement probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-generalized-20260918
+    paths:
+      - 'hmc/hmc_reverse_v1.cpp'
+      - '.github/workflows/hmc-reverse-probe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip time
+      - name: Fetch corpus
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          head -c 67108864 enwik9 > probe.bin
+      - name: Build
+        run: |
+          g++ -O3 -std=c++17 hmc/hmc_reverse_v1.cpp -o hmc_reverse_v1
+          strip hmc_reverse_v1 || true
+      - name: Reverse HMC exactness
+        run: |
+          /usr/bin/time -v ./hmc_reverse_v1 e probe.bin probe.hmr 2> encode.log
+          /usr/bin/time -v ./hmc_reverse_v1 d probe.hmr probe.recovered 2> decode.log
+          cmp probe.bin probe.recovered
+      - name: Compression comparison
+        run: |
+          xz -9e --threads=1 -c probe.hmr > probe.hmr.xz
+          xz -9e --threads=1 -c probe.bin > probe.raw.xz
+          python3 - <<'PY' | tee HMC_REVERSE_PROBE_RESULT.json
+          import os,json,hashlib
+          def h(p):
+              x=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(1<<20),b''): x.update(b)
+              return x.hexdigest()
+          src=os.path.getsize('probe.bin')
+          d={
+            'source_bytes':src,
+            'source_sha256':h('probe.bin'),
+            'reverse_hmc_bytes':os.path.getsize('probe.hmr'),
+            'reverse_hmc_xz_bytes':os.path.getsize('probe.hmr.xz'),
+            'direct_xz_bytes':os.path.getsize('probe.raw.xz'),
+            'decoder_bytes':os.path.getsize('hmc_reverse_v1'),
+            'exact':h('probe.bin')==h('probe.recovered')
+          }
+          d['reverse_ratio']=d['reverse_hmc_bytes']/src
+          d['reverse_xz_ratio']=d['reverse_hmc_xz_bytes']/src
+          d['direct_xz_ratio']=d['direct_xz_bytes']/src
+          print(json.dumps(d,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-reverse-probe
+          path: |
+            HMC_REVERSE_PROBE_RESULT.json
+            encode.log
+            decode.log
