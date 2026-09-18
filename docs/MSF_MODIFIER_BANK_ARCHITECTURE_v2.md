@@ -1,6 +1,6 @@
 # MSF Modifier-Bank Page Orchestra v2.0
 
-Status: CANDIDATE CANONICAL — validation in progress
+Status: CANDIDATE CANONICAL — validation in progress\n\nCanonical three-object model: orchestra/Encoder = the process that performs the page data; recording = the retained `.msf` artifact being optimized; audience/Decoder = the generic Listener that listens only to the recording and reconstructs the source.
 
 ## Canonical revision
 
@@ -87,7 +87,7 @@ Decoder computation is allowed. Source-dependent retained data must be counted.
 
 Canonical:
 ```
-source -> Composer -> .msf -> Listener -> source
+source -> orchestra/Composer -> recorded .msf -> audience/Listener -> source
 ```
 
 Optional:
