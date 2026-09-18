@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'experiments/truecss_act206_probe.cpp'
+      - 'experiments/truecss_act206_v2_probe.cpp'
       - '.github/workflows/truecss-act206-probe.yml'
   workflow_dispatch:
 
@@ -24,16 +25,23 @@ jobs:
           echo "e206c3450ac99950df65bf70ef61a12d  enwik9" | md5sum -c -
           echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
 
-      - name: Build
-        run: g++ -O3 -std=c++20 experiments/truecss_act206_probe.cpp -o truecss_act206_probe
+      - name: Build V1 and V2
+        run: |
+          g++ -O3 -std=c++20 experiments/truecss_act206_probe.cpp -o truecss_act206_v1
+          g++ -O3 -std=c++20 experiments/truecss_act206_v2_probe.cpp -o truecss_act206_v2
 
-      - name: Run three 50 MB ACT206 laws
+      - name: Run 50 MB ACT206 V1 and V2 laws
         run: |
           set +e
           : > act206_results.txt
           for law in count page_recursive context_recursive; do
-            echo "=== $law ===" | tee -a act206_results.txt
-            /usr/bin/time -v ./truecss_act206_probe enwik9 "$law" >> act206_results.txt 2>&1
+            echo "=== V1 $law ===" | tee -a act206_results.txt
+            /usr/bin/time -v ./truecss_act206_v1 enwik9 "$law" >> act206_results.txt 2>&1
+            echo "exit_code=$?" >> act206_results.txt
+          done
+          for law in count_affine page_affine context_affine; do
+            echo "=== V2 $law ===" | tee -a act206_results.txt
+            /usr/bin/time -v ./truecss_act206_v2 enwik9 "$law" >> act206_results.txt 2>&1
             echo "exit_code=$?" >> act206_results.txt
           done
           cat act206_results.txt
