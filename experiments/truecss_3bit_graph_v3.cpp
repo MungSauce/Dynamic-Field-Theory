@@ -33,17 +33,20 @@ static uint32_t edge_destination(uint32_t edge_id){
     return (uint32_t)(comb(node,0x4752415048454447ULL+slot)%NODE_COUNT);
 }
 
-struct EdgePair{uint32_t a,b;uint8_t modifier;};
+struct EdgeTriple{uint32_t a,b,ref;uint8_t modifier;};
 
-static EdgePair relation(uint64_t t,uint64_t ctx,int bit){
+static EdgeTriple relation(uint64_t t,uint64_t ctx,int bit){
     uint64_t q=t/PAGE,k=t%PAGE,Q=page_state(q);
     uint64_t base=comb(comb(Q,k),comb(ctx,(uint64_t)bit+0x4c4956455a45524fULL));
     uint32_t a=(uint32_t)(comb(base,t^0xa0761d6478bd642fULL)%EDGE_COUNT);
     uint32_t b=(uint32_t)(comb(base,t^0xe7037ed1a0b428dbULL)%EDGE_COUNT);
+    uint32_t ref=(uint32_t)(comb(base,t^0x8ebc6af09c88c6e3ULL)%EDGE_COUNT);
     if(a==b)b=(b+1)%EDGE_COUNT;
+    if(ref==a||ref==b)ref=(ref+2)%EDGE_COUNT;
+    if(ref==a||ref==b)ref=(ref+1)%EDGE_COUNT;
     // Touch endpoint derivation so graph identity includes the fixed topology.
-    (void)edge_destination(a);(void)edge_destination(b);
-    return{a,b,(uint8_t)(comb(base,0x8ebc6af09c88c6e3ULL)&1ULL)};
+    (void)edge_destination(a);(void)edge_destination(b);(void)edge_destination(ref);
+    return{a,b,ref,(uint8_t)(comb(base,0x94d049bb133111ebULL)&1ULL)};
 }
 
 struct ParityDSU{
@@ -61,13 +64,9 @@ struct ParityDSU{
         parity[x]^=f.second;parent[x]=f.first;
         return{parent[x],parity[x]};
     }
-    bool impose_opposition(uint32_t a,uint32_t b,uint8_t orientation){
-        // orientation 0: a=+1,b=-1 ; orientation 1: a=-1,b=+1.
-        // Both cases require opposite signs; orientation relative to a generic
-        // component reference is carried separately by the target modifier.
+    bool impose_relation(uint32_t a,uint32_t b,uint8_t rel){
         active[a]=active[b]=1;
         auto A=find(a),B=find(b);
-        uint8_t rel=1; // signs must differ -> live zero
         if(A.first==B.first)return (uint8_t)(A.second^B.second)==rel;
         uint8_t rp=(uint8_t)(rel^A.second^B.second);
         if(rankv[A.first]<rankv[B.first]){
@@ -76,11 +75,15 @@ struct ParityDSU{
             parent[B.first]=A.first;parity[B.first]=rp;
             if(rankv[A.first]==rankv[B.first])rankv[A.first]++;
         }
+        return true;
+    }
 
-        // The graph relation itself only requires opposition. The logical
-        // orientation is encoded by ordering the two edge ids selected by
-        // the routing law; swapping a/b flips the observed bit.
-        (void)orientation;
+    bool impose_live_zero_bit(uint32_t a,uint32_t b,uint32_t ref,uint8_t orientation){
+        // a and b form the live-zero pair: always opposite.
+        // orientation is stored only as a RELATION between a and ref.
+        // No edge receives an absolute sign during teaching.
+        if(!impose_relation(a,b,1))return false;
+        if(!impose_relation(a,ref,orientation))return false;
         return true;
     }
     std::vector<int8_t> freeze(){
@@ -96,17 +99,18 @@ struct ParityDSU{
 
 static uint8_t resolve_bit(const std::vector<int8_t>&w,uint64_t t,uint64_t ctx,int bit){
     auto r=relation(t,ctx,bit);
-    int8_t a=w[r.a],b=w[r.b];
+    int8_t a=w[r.a],b=w[r.b],ref=w[r.ref];
     int net=(int)a+(int)b;
     int activity=(a!=0)+(b!=0);
 
-    // Dead zero and nonbalanced active states are distinct and invalid here.
+    // Dead zero and balanced live zero are intentionally distinct.
     if(activity==0)throw std::runtime_error("dead-zero queried");
     if(activity!=2||net!=0)throw std::runtime_error("relation is not live-zero");
+    if(ref==0)throw std::runtime_error("dead reference edge");
 
-    // Two live-zero orientations:
-    // (+1,-1) => 0, (-1,+1) => 1, then generic modifier.
-    uint8_t orientation=(a<0)?1:0;
+    // The binary orientation is relative, not absolute:
+    // a same sign as ref => 0; opposite sign => 1.
+    uint8_t orientation=(a==ref)?0:1;
     return (uint8_t)(orientation^r.modifier);
 }
 
@@ -166,12 +170,9 @@ static int train(const std::string&src,const std::string&state,uint64_t limit){
             auto r=relation(t,ctx,bit);
             uint8_t target=(uint8_t)(((code>>bit)&1)^r.modifier);
 
-            // A bit is always a LIVE zero: opposing signed edges. The target
-            // decides which routed edge is treated as the positive-first side.
-            // Swap order for the opposite orientation without changing sum.
-            uint32_t a=target?r.b:r.a;
-            uint32_t b=target?r.a:r.b;
-            if(!dsu.impose_opposition(a,b,target)){
+            // a/b are always a LIVE zero. The bit is the orientation of a
+            // relative to a third graph edge, preserving global sign symmetry.
+            if(!dsu.impose_live_zero_bit(r.a,r.b,r.ref,target)){
                 std::cout<<"status=RELATIONAL_CONTRADICTION bytes_imprinted="<<t
                          <<" bit_slot="<<bit<<" page="<<t/PAGE<<" key="<<t%PAGE
                          <<" terminals_seen="<<terms<<" physical_nodes="<<NODE_COUNT
