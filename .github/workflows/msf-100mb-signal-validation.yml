@@ -1,0 +1,41 @@
+name: MSF 100MB pure-signal validation
+
+on:
+  pull_request:
+    paths:
+      - 'validation/msf_signal_100mb.py'
+      - '.github/workflows/msf-100mb-signal-validation.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download canonical enwik9 and extract first 100MB
+        run: |
+          curl -L --fail --retry 4 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          python3 - <<'PY'
+          import hashlib, zipfile
+          with zipfile.ZipFile('enwik9.zip') as z, z.open('enwik9') as src, open('enwik100m','wb') as out:
+              left=100_000_000
+              h=hashlib.sha256()
+              while left:
+                  b=src.read(min(8<<20,left))
+                  if not b: raise SystemExit('unexpected EOF')
+                  out.write(b); h.update(b); left-=len(b)
+          print('prefix_sha256='+h.hexdigest())
+          PY
+          test "$(stat -c%s enwik100m)" = "100000000"
+
+      - name: Compose pure field, erase source, listen, verify
+        run: python3 validation/msf_signal_100mb.py enwik100m
+
+      - name: Publish report
+        uses: actions/upload-artifact@v4
+        with:
+          name: msf-100mb-pure-signal-report
+          path: msf_100mb_report.json
+          if-no-files-found: error

@@ -1,0 +1,60 @@
+name: MSF recording v3 100MB cold replay
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'msf_recording_v3/**'
+      - 'validation/msf_recording_v3_100mb.py'
+      - '.github/workflows/msf-recording-v3-100mb.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install numeric runtime
+        run: python3 -m pip install --disable-pip-version-check -q numpy
+
+      - name: Smoke test true recording separation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('smoke.txt')
+          p.write_bytes((b'alpha beta gamma delta\n' * 8192) + bytes(range(32,127))*100)
+          PY
+          PYTHONPATH=msf_recording_v3 python3 msf_recording_v3/orchestra_encoder.py smoke.txt smoke.msf -n 32
+          cp smoke.txt smoke.expected
+          rm smoke.txt
+          PYTHONPATH=msf_recording_v3 python3 msf_recording_v3/audience_decoder.py smoke.msf smoke.recovered
+          cmp smoke.expected smoke.recovered
+
+      - name: Restore checkout after destructive smoke test
+        run: git checkout -- msf_recording_v3/orchestra_encoder.py || true
+
+      - name: Download canonical enwik9 and extract first 100MB
+        run: |
+          curl -L --fail --retry 4 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          python3 - <<'PY'
+          import hashlib, zipfile
+          with zipfile.ZipFile('enwik9.zip') as z, z.open('enwik9') as src, open('enwik100m','wb') as out:
+              left=100_000_000;h=hashlib.sha256()
+              while left:
+                  b=src.read(min(8<<20,left))
+                  if not b:raise SystemExit('unexpected EOF')
+                  out.write(b);h.update(b);left-=len(b)
+          print('prefix_sha256='+h.hexdigest())
+          PY
+          test "$(stat -c%s enwik100m)" = "100000000"
+
+      - name: Encode recording, erase orchestra/source, audience cold replay
+        run: python3 validation/msf_recording_v3_100mb.py enwik100m
+
+      - name: Publish measured report
+        uses: actions/upload-artifact@v4
+        with:
+          name: msf-recording-v3-100mb-report
+          path: msf_recording_v3_100mb_report.json
+          if-no-files-found: error
