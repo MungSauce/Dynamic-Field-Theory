@@ -63,13 +63,17 @@ def compose(source,msf,N=128):
       "format":"MSFR32A1","source_bytes":n,"instrument_count":N,"page_count":N,
       "alphabet_size":A,"shared_directional_note_lexicon":2*A,
       "symbols_per_full_timestamp":2*N,"frame_count":frames,
+      "track_count":1,
+      "track_layout":"single 1-D mixed composite signal stream",
+      "samples_per_logical_timestamp":N,
+      "per_instrument_tracks_stored":False,
       "signal_sample_alphabet":signal_base,"signal_sample_count":samples,
       "signal_payload_bytes":pbytes,"complete_msf_bytes":msf.stat().st_size,
       "signal_ratio":pbytes/n,"signal_compression_percent":100*(1-pbytes/n),
       "source_sha256":source_sha.hex(),"payload_sha256":payload_sha.hex(),
       "instrument_basis":"Walsh DSSS/CDMA-like signatures",
       "postmix_recording_mask":"deterministic PRN chip scrambler",
-      "recording_semantics":"bit-packed noise-like composite signal samples only",
+      "recording_semantics":"one continuous mono-like mixed track of bit-packed noise-like composite signal samples; N chips form one audience analysis window, not N stored instrument tracks",
       "composer_required_after_recording":False
     }
 
