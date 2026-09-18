@@ -1,0 +1,134 @@
+name: Hutter RATA parameter-transcoding probe
+
+on:
+  push:
+    branches:
+      - hutter-target-apc-bot-20260917
+    paths:
+      - '.github/workflows/hutter-rata-weight-probe.yml'
+  workflow_dispatch:
+
+jobs:
+  weights:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout pinned public RATA-CMIX
+        uses: actions/checkout@v4
+        with:
+          repository: Dharmesh2015/RATA-CMIX
+          ref: 0f336dc7fa5d0ac656c671be211879c8ad3eb4dd
+          path: rata
+          fetch-depth: 1
+
+      - name: Install analysis codecs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xz-utils zstd brotli bzip2
+          python3 -m pip install --quiet numpy
+
+      - name: Baseline and generic outer transforms
+        run: |
+          set -euxo pipefail
+          cd rata
+          MODEL=models/6m-q4-fp32.tfwc5
+          test "$(stat -c%s "$MODEL")" = "2902452"
+          xz -9e --threads=1 -c "$MODEL" > /tmp/model.tfwc5.xz
+          zstd -q --ultra -22 -T1 -f "$MODEL" -o /tmp/model.tfwc5.zst
+          brotli -q 11 -w 24 -o /tmp/model.tfwc5.br "$MODEL"
+          bzip2 -9 -c "$MODEL" > /tmp/model.tfwc5.bz2
+          {
+            echo "TFWC5_BYTES=$(stat -c%s "$MODEL")"
+            echo "TFWC5_XZ_BYTES=$(stat -c%s /tmp/model.tfwc5.xz)"
+            echo "TFWC5_ZSTD_BYTES=$(stat -c%s /tmp/model.tfwc5.zst)"
+            echo "TFWC5_BROTLI_BYTES=$(stat -c%s /tmp/model.tfwc5.br)"
+            echo "TFWC5_BZIP2_BYTES=$(stat -c%s /tmp/model.tfwc5.bz2)"
+          } | tee /tmp/weight_metrics.txt
+
+      - name: Reconstruct reference tensors and run dormant structural transcoder
+        run: |
+          set -euxo pipefail
+          cd rata
+          python3 -m pysrc.weights_compress decompress models/6m-q4-fp32.tfwc5 /tmp/weights.bin
+          python3 pysrc/weights_recompress_bin_v4.py compress /tmp/weights.bin /tmp/model.tfwc4 | tee /tmp/tfwc4.log
+          python3 pysrc/weights_recompress_bin_v4.py verify /tmp/weights.bin /tmp/model.tfwc4
+          xz -9e --threads=1 -c /tmp/model.tfwc4 > /tmp/model.tfwc4.xz
+          {
+            echo "RAW_WEIGHT_BYTES=$(stat -c%s /tmp/weights.bin)"
+            echo "TFWC4_BYTES=$(stat -c%s /tmp/model.tfwc4)"
+            echo "TFWC4_XZ_BYTES=$(stat -c%s /tmp/model.tfwc4.xz)"
+          } | tee -a /tmp/weight_metrics.txt
+
+      - name: Screen causal row and column parameter models
+        run: |
+          set -euxo pipefail
+          cd rata
+          python3 pysrc/weights_recompress_bin_v4.py screen models/6m-q4-fp32.tfwc5 /tmp/q4_screen.json | tee /tmp/q4_screen.txt
+
+      - name: Exact outer-transform restoration checks
+        run: |
+          set -euxo pipefail
+          cd rata
+          xz -dc /tmp/model.tfwc5.xz > /tmp/r1
+          zstd -q -d -f /tmp/model.tfwc5.zst -o /tmp/r2
+          brotli -d -o /tmp/r3 /tmp/model.tfwc5.br
+          bzip2 -dc /tmp/model.tfwc5.bz2 > /tmp/r4
+          cmp models/6m-q4-fp32.tfwc5 /tmp/r1
+          cmp models/6m-q4-fp32.tfwc5 /tmp/r2
+          cmp models/6m-q4-fp32.tfwc5 /tmp/r3
+          cmp models/6m-q4-fp32.tfwc5 /tmp/r4
+          echo "GENERIC_OUTER_EXACT=PASS" | tee -a /tmp/weight_metrics.txt
+
+      - name: Calculate Hutter-style leverage
+        run: |
+          python3 - <<'PY' | tee WEIGHT_TRANSCODE_RESULT.json
+          import json,re
+          m={}
+          for line in open('/tmp/weight_metrics.txt'):
+              if '=' in line:
+                  k,v=line.strip().split('=',1)
+                  try:m[k]=int(v)
+                  except:m[k]=v
+          screen=json.load(open('/tmp/q4_screen.json'))
+          baseline=2_902_452
+          candidates={
+            'tfwc5':m['TFWC5_BYTES'],
+            'tfwc5_xz':m['TFWC5_XZ_BYTES'],
+            'tfwc5_zstd':m['TFWC5_ZSTD_BYTES'],
+            'tfwc5_brotli':m['TFWC5_BROTLI_BYTES'],
+            'tfwc5_bzip2':m['TFWC5_BZIP2_BYTES'],
+            'tfwc4':m['TFWC4_BYTES'],
+            'tfwc4_xz':m['TFWC4_XZ_BYTES'],
+          }
+          best_name,best=min(candidates.items(),key=lambda kv:kv[1])
+          per_copy=baseline-best
+          rata_total=100_219_121
+          naive_double=rata_total-2*per_copy
+          target=99_312_424
+          out={
+            'upstream':'Dharmesh2015/RATA-CMIX@0f336dc7fa5d0ac656c671be211879c8ad3eb4dd',
+            'license':'GPLv3; upstream attribution required',
+            'baseline_model_bytes':baseline,
+            'candidates':candidates,
+            'smallest_measured_parameter_carrier':{'name':best_name,'bytes':best},
+            'per_copy_model_savings_before_decoder_overhead':per_copy,
+            'naive_hutter_total_if_savings_apply_to_two_embedded_copies':naive_double,
+            'frontier_target':target,
+            'naive_gap_after_parameter_savings':naive_double-target,
+            'q4_context_screen':screen,
+            'qualification':'outer codec/alternate container decoder bytes and integration costs are not yet charged; this is a parameter-representation probe, not a Hutter score claim'
+          }
+          print(json.dumps(out,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hutter-rata-weight-probe
+          path: |
+            WEIGHT_TRANSCODE_RESULT.json
+            /tmp/weight_metrics.txt
+            /tmp/q4_screen.json
+            /tmp/q4_screen.txt
+            /tmp/tfwc4.log
