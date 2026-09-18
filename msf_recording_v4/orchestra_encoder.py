@@ -26,18 +26,22 @@ def compose(source,msf,N=128):
     payload_tmp=Path(str(msf)+".payload.tmp")
     ph=hashlib.sha256();payload_bytes=0
     slots=[instrument_slot(i,N) for i in range(N)]
-    weights=[pow(B,s) for s in slots]
     with open(source,"rb") as sf,open(payload_tmp,"wb") as out:
         mm=mmap.mmap(sf.fileno(),0,access=mmap.ACCESS_READ)
         try:
             for t in range(frames):
-                sample=0
+                digits=[0]*N
                 for i in range(N):
                     s,e=page_bounds(n,N,i);L=e-s
                     fv=ranks[mm[s+t]] if t<(L+1)//2 else 0
                     rv=ranks[mm[e-1-t]] if t<L//2 else 0
                     pair=fv+A*rv
-                    sample += apply_modifier(pair,i,B)*weights[i]
+                    digits[slots[i]]=apply_modifier(pair,i,B)
+                # One literal composite sample: all modified instruments
+                # superpose into one scalar machine-signal amplitude.
+                sample=0
+                for d in reversed(digits):
+                    sample=sample*B+d
                 raw=sample.to_bytes(sb,"little")
                 out.write(raw);ph.update(raw);payload_bytes+=sb
         finally:mm.close()
