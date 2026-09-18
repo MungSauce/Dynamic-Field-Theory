@@ -21,3 +21,22 @@ The retained `.msf` payload is **one continuous 1-D mixed track**. It is not a m
 At each logical timestamp, the orchestra contributes all instrument activity into one analysis window of the same track. For the current Walsh/DSSS reference, that window contains N sequential chips/samples. Those chips are analogous to samples inside one short audio/radio interval; they are not separate instrument tracks.
 
 The Audience consumes that one track, applies the generic despreading/matched-filter bank over each analysis window, and reconstructs the page instruments from the mixture.
+
+
+## Iteration discipline
+
+Every new revision must preserve all validated architecture that is not the explicit optimization target.
+
+A revision may change only:
+1. the component currently being improved; and
+2. the minimum interface/integration changes strictly required for that improvement to work with the frozen architecture.
+
+Unrelated geometry, page assignment, shared lexicon semantics, two-direction reading, orchestra/recording/audience separation, mixed-track requirement, cold-replay boundary, and measurement definitions remain invariant unless a future revision explicitly names one of them as the optimization target.
+
+Each experiment must state before implementation:
+- frozen invariants;
+- single optimization target;
+- required integration changes;
+- measured acceptance criterion.
+
+If an implementation change alters anything outside that declared scope, it is a separate architecture revision and must not be folded into the experiment silently.
