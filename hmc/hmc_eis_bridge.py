@@ -98,3 +98,5 @@ def main():
 
 if __name__=="__main__":
     main()
+
+# CANONICAL REPLICATION NOTICE (2026-09-18): predecessor/lineage artifact. Current protocol: compression/EIS_K32_FORMAL_REPLICATION_V1.md

@@ -122,3 +122,4 @@ int main(int argc,char**argv){
     }catch(const std::exception&e){std::cerr<<"LK_ERROR "<<e.what()<<"\n";return 1;}
     return 0;
 }
+// CANONICAL REPLICATION NOTICE (2026-09-18): predecessor/lineage artifact. Current protocol: compression/EIS_K32_FORMAL_REPLICATION_V1.md
