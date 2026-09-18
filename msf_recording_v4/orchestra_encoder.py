@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse,hashlib,json,mmap,os
 from pathlib import Path
 from msf_format import make_header,MAX_ALPHABET
-from signal_basis import page_bounds,frame_count,instrument_slot,apply_modifier,sample_bytes_for
+from signal_basis import page_bounds,frame_count,apply_modifier,sample_bytes_for,mix_field,spectral_permute
 
 def scan(path):
     seen=bytearray(256);h=hashlib.sha256();n=0
@@ -25,22 +25,25 @@ def compose(source,msf,N=128):
     frames=frame_count(n,N);sb=sample_bytes_for(B,N)
     payload_tmp=Path(str(msf)+".payload.tmp")
     ph=hashlib.sha256();payload_bytes=0
-    slots=[instrument_slot(i,N) for i in range(N)]
-    with open(source,"rb") as sf,open(payload_tmp,"wb") as out:
+     with open(source,"rb") as sf,open(payload_tmp,"wb") as out:
         mm=mmap.mmap(sf.fileno(),0,access=mmap.ACCESS_READ)
         try:
             for t in range(frames):
-                digits=[0]*N
+                instrument_states=[0]*N
                 for i in range(N):
                     s,e=page_bounds(n,N,i);L=e-s
                     fv=ranks[mm[s+t]] if t<(L+1)//2 else 0
                     rv=ranks[mm[e-1-t]] if t<L//2 else 0
                     pair=fv+A*rv
-                    digits[slots[i]]=apply_modifier(pair,i,B)
-                # One literal composite sample: all modified instruments
-                # superpose into one scalar machine-signal amplitude.
+                    instrument_states[i]=apply_modifier(pair,i,B)
+
+                # Audio-adjacent signal stage: procedural timbres first, then a
+                # reversible full-orchestra filter-bank mix. The recording has
+                # no page-aligned coefficients. Only the resulting composite
+                # signal sample is serialized.
+                mixed=spectral_permute(mix_field(instrument_states,B))
                 sample=0
-                for d in reversed(digits):
+                for d in reversed(mixed):
                     sample=sample*B+d
                 raw=sample.to_bytes(sb,"little")
                 out.write(raw);ph.update(raw);payload_bytes+=sb
@@ -61,7 +64,7 @@ def compose(source,msf,N=128):
       "signal_ratio":payload_bytes/n,
       "signal_compression_percent":100*(1-payload_bytes/n),
       "source_sha256":source_sha.hex(),"payload_sha256":payload_sha.hex(),
-      "recording_semantics":"one scalar composite machine-signal sample per timestamp",
+      "recording_semantics":"one high-precision composite signal sample per timestamp after procedural timbre + reversible full-orchestra filter-bank mixing",
       "composer_required_after_recording":False
     }
 
