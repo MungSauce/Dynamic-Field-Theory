@@ -1,0 +1,61 @@
+name: EIS parallel keyboard MP3 quick
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-eis-206tone-20260918
+    paths:
+      - '.github/workflows/eis-parallel-keyboard-mp3-quick.yml'
+
+jobs:
+  quick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg python3-numpy
+      - name: Targeted simultaneous sweep
+        run: |
+          python3 - <<'PY' | tee EIS_PARALLEL_KEYBOARD_QUICK.json
+          import importlib.util, json, os, subprocess
+          import numpy as np
+          p="audio_lab/eis_parallel_keyboard_mp3_v2.py"
+          spec=importlib.util.spec_from_file_location("m",p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          outdir="quick_multi";os.makedirs(outdir,exist_ok=True)
+          rows=[]
+          cases=[
+            (206,206,"onehot"),(206,206,0.05),(206,256,"onehot"),(206,256,0.05),(206,412,0.10),
+            (412,412,"onehot"),(412,412,0.02),(412,512,"onehot"),(412,512,0.02)
+          ]
+          nslots=128
+          for k,cell,density in cases:
+            states=m.mk_states(k,nslots,density,17000+k+cell+int(100*(density if density!="onehot" else 0)))
+            tag=f"k{k}_c{cell}_d{str(density).replace('.','p')}"
+            wav=f"{outdir}/{tag}.wav";fs=m.write_pcm(wav,states,k,cell)
+            raw=m.read_pcm(wav);r0=m.decode(raw,k,cell,nslots)
+            pcm_errors=int(np.count_nonzero(r0!=states))
+            for br in (320,256,192,160,128,96):
+              mp3=f"{outdir}/{tag}_{br}.mp3";dec=f"{outdir}/{tag}_{br}.wav"
+              subprocess.run(["ffmpeg","-loglevel","error","-y","-i",wav,"-codec:a","libmp3lame","-b:a",f"{br}k",mp3],check=True)
+              subprocess.run(["ffmpeg","-loglevel","error","-y","-i",mp3,"-ac","1","-ar",str(m.SR),"-c:a","pcm_s16le",dec],check=True)
+              x=m.read_pcm(dec);off=m.align_decoded(x,states,k,cell);rr=m.decode(x[off:],k,cell,nslots)
+              err=int(np.count_nonzero(rr!=states));sloterr=int(np.count_nonzero(np.any(rr!=states,axis=1)))
+              rows.append({
+                "carriers":k,"cell_samples":cell,"density":density,"bitrate_kbps":br,
+                "pcm_errors":pcm_errors,"control_errors":err,"slot_errors":sloterr,"exact":err==0,
+                "mp3_bytes":os.path.getsize(mp3),"duration_sec":nslots*cell/m.SR,
+                "tone_spacing_hz":float(fs[1]-fs[0]),
+                "mp3_bits_per_control_state":os.path.getsize(mp3)*8/(nslots*k)
+              })
+          ex=[r for r in rows if r["exact"]]
+          print(json.dumps({"exact_cases":len(ex),"best_exact":min(ex,key=lambda r:r["mp3_bits_per_control_state"]) if ex else None,"rows":rows},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eis-parallel-keyboard-quick
+          path: EIS_PARALLEL_KEYBOARD_QUICK.json
