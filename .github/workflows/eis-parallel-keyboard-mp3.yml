@@ -1,0 +1,46 @@
+name: EIS parallel keyboard MP3
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-eis-206tone-20260918
+    paths:
+      - 'audio_lab/eis_parallel_keyboard_mp3_v2.py'
+      - '.github/workflows/eis-parallel-keyboard-mp3.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg python3-numpy
+      - name: Run simultaneous-control sweep
+        run: |
+          python3 audio_lab/eis_parallel_keyboard_mp3_v2.py --slots 512 | tee EIS_PARALLEL_KEYBOARD_MP3_RESULT.json
+      - name: Summarize
+        run: |
+          python3 - <<'PY'
+          import json
+          d=json.load(open("EIS_PARALLEL_KEYBOARD_MP3_RESULT.json"))
+          print("EXACT_CASES",d["exact_cases"])
+          print("BEST_EXACT",d["best_exact"])
+          # Best exact one-hot and stacked cases separately
+          rows=d["results"]
+          for label, pred in [
+            ("ONEHOT_206", lambda r:r["carriers"]==206 and r["density"]=="onehot"),
+            ("STACKED_206", lambda r:r["carriers"]==206 and r["density"]!="onehot"),
+            ("DUPLICATE_412", lambda r:r["carriers"]==412)
+          ]:
+            ex=[r for r in rows if r["exact"] and pred(r)]
+            print(label, min(ex,key=lambda r:r["mp3_bits_per_control_state"]) if ex else None)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eis-parallel-keyboard-mp3
+          path: EIS_PARALLEL_KEYBOARD_MP3_RESULT.json
