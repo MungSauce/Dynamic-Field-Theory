@@ -68,7 +68,7 @@ def write_wav(path,q,bits):
         if bits==16:
             w.writeframes(q.astype("<i2").tobytes())
         elif bits==24:
-            v=q.astype(np.int64)&0xFFFFFF
+            v=q.astype(np.int64).reshape(-1)&0xFFFFFF
             o=np.empty((v.size,3),dtype=np.uint8)
             o[:,0]=(v&255).astype(np.uint8);o[:,1]=((v>>8)&255).astype(np.uint8);o[:,2]=((v>>16)&255).astype(np.uint8)
             w.writeframes(o.tobytes())
