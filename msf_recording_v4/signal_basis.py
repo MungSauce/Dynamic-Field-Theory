@@ -33,30 +33,24 @@ def sample_bytes_for(B,N):
 
 
 def mix_field(v,B):
-    """Reversible all-instrument filter-bank style mixing over the note-state ring.
+    """Reversible IIR/filter-bank style orchestra mix.
 
-    Each butterfly has determinant 1, so no source-specific inverse table exists.
-    After all stages, every coefficient depends on many instruments.
+    Each output after the first depends recursively on the previous mixed
+    coefficient, so the recording does not preserve page-aligned states.
     """
-    y=list(v);span=1
-    while span<len(y):
-        for base in range(0,len(y),2*span):
-            for j in range(base,base+span):
-                a=y[j];b=y[j+span]
-                y[j]=(a+b)%B
-                y[j+span]=(a+2*b)%B
-        span*=2
+    y=[0]*len(v);acc=0
+    for i,x in enumerate(v):
+        alpha=(2*i+3)%B
+        acc=(x + alpha*acc) % B
+        y[i]=acc
     return y
 
 def unmix_field(v,B):
-    y=list(v);span=len(y)//2
-    while span:
-        for base in range(0,len(y),2*span):
-            for j in range(base,base+span):
-                u=y[j];w=y[j+span]
-                y[j]=(2*u-w)%B
-                y[j+span]=(w-u)%B
-        span//=2
+    y=[0]*len(v);prev=0
+    for i,w in enumerate(v):
+        alpha=(2*i+3)%B
+        y[i]=(w - alpha*prev) % B
+        prev=w
     return y
 
 def spectral_permute(v):
