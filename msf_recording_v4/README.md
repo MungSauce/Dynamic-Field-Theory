@@ -1,18 +1,20 @@
-# MSF Recording v4 — one composite sample per timestamp
+# MSF Recording v4 — SUPERSEDED / INVALID AS CURRENT SIGNAL MODEL
 
-This revision fixes the measured v3 error: v3 stored N signal samples per timestamp, which canceled the N-way page/time reduction.
+Status: **SUPERSEDED**
 
-v4 records exactly **one scalar machine-signal sample per timestamp**.
+This experiment attempted to force one scalar value per timestamp by radix-packing the complete set of instrument states into one arbitrarily wide integer.
 
-The architecture remains unchanged:
-- orchestra/Encoder performs the source;
-- one instrument owns one deterministic page;
-- every page is read from both ends simultaneously;
-- every instrument reuses the same shared directional lexicon (up to 412 note identities);
-- instrument identity is a generic procedural modifier/basis;
-- only the resulting signal sample is recorded;
-- the audience/Decoder receives the recording, not the orchestra state.
+That does **not** satisfy the current MSF recording definition. It is a state snapshot encoded as a scalar, not an audio-adjacent sampled composite field. It is retained only as falsification/lineage evidence.
 
-The reference basis gives each instrument a procedural positional gain inside one scalar superposition. That makes the sample exactly invertible and lets us measure the actual precision/byte cost of one composite sample rather than hiding N stored samples behind the word "signal".
+Do not use its byte results as MSF signal-compression results.
 
-Primary score = recorded signal payload bytes / source bytes.
+Current implementation line: `msf_recording_v32/`
+
+The current line instead uses:
+- one page per instrument;
+- two simultaneous directional notes;
+- one shared lexicon;
+- deterministic Walsh/DSSS-like instrument signatures;
+- literal superposition into a composite sample field;
+- deterministic PRN chip scrambling after mixing;
+- an Audience that despreads and matched-filters the recording.
