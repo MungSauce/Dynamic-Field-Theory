@@ -111,3 +111,5 @@ int main(int argc,char**argv){
         std::string op=argv[1];if(op=="e"||op=="encode")encode(argv[2],argv[3],argc>4?argv[4]:"freq-desc");else if(op=="d"||op=="decode")decode(argv[2],argv[3]);else throw std::runtime_error("op");
     }catch(const std::exception&e){std::cerr<<"HMC2_ERROR "<<e.what()<<"\n";return 1;}return 0;
 }
+
+// CANONICAL REPLICATION NOTICE (2026-09-18): predecessor/lineage artifact. Current protocol: compression/EIS_K32_FORMAL_REPLICATION_V1.md
