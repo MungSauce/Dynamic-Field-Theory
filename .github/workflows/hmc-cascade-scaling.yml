@@ -1,0 +1,74 @@
+name: HMC Cascade scaling benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-cascade-20260918
+    paths:
+      - 'hmc/hmc_cascade_v1.cpp'
+      - '.github/workflows/hmc-cascade-scaling.yml'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip time
+      - name: Fetch enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Build
+        run: |
+          g++ -O3 -std=c++17 hmc/hmc_cascade_v1.cpp -o hmc_cascade_v1
+          strip hmc_cascade_v1 || true
+          stat -c 'DECODER_BYTES=%s' hmc_cascade_v1
+      - name: Benchmark prefixes
+        run: |
+          set -euxo pipefail
+          : > cascade.tsv
+          printf "source_bytes\tcarrier_bytes\tcomplete_bytes\tbpa\txz_bytes\texact\n" >> cascade.tsv
+          for N in 1000000 10000000 100000000; do
+            head -c "$N" enwik9 > "src_$N"
+            /usr/bin/time -f "ENCODE_\${N}_SECONDS=%e" ./hmc_cascade_v1 e "src_$N" "src_$N.hcc" 2> "enc_$N.log"
+            /usr/bin/time -f "DECODE_\${N}_SECONDS=%e" ./hmc_cascade_v1 d "src_$N.hcc" "rec_$N" 2> "dec_$N.log"
+            cmp "src_$N" "rec_$N"
+            xz -9e --threads=1 -c "src_$N" > "src_$N.xz"
+            python3 - "$N" <<'PY' >> cascade.tsv
+          import os,sys
+          n=int(sys.argv[1]); c=os.path.getsize(f"src_{n}.hcc"); d=os.path.getsize("hmc_cascade_v1"); x=os.path.getsize(f"src_{n}.xz")
+          print(f"{n}\t{c}\t{c+d}\t{8*(c+d)/n:.9f}\t{x}\t1")
+          PY
+          done
+          cat cascade.tsv
+      - name: JSON result
+        run: |
+          python3 - <<'PY' | tee HMC_CASCADE_RESULT.json
+          import csv,json,os
+          rows=[]
+          with open("cascade.tsv") as f:
+              for r in csv.DictReader(f,delimiter="\t"):
+                  rows.append({k:(float(v) if k=="bpa" else int(v)) for k,v in r.items() if k!="exact"} | {"exact":r["exact"]=="1"})
+          print(json.dumps({
+              "codec":"HMC Cascade v1",
+              "decoder_bytes":os.path.getsize("hmc_cascade_v1"),
+              "rows":rows,
+              "interpretation":"online self-training activation path; no trained source model stored"
+          },indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-cascade-scaling
+          path: |
+            HMC_CASCADE_RESULT.json
+            cascade.tsv
+            enc_*.log
+            dec_*.log
