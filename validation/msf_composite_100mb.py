@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib, json, math, os, struct, sys, tempfile, time, zlib
 from pathlib import Path
 
-MAGIC=b'MSFCMP01'
+MAGIC=b'MSFMIX01'
 VERSION=1
 HEADER_SIZE=160
 INSTRUMENTS=32
@@ -39,6 +39,30 @@ def frame_count_for(n):
         n-=L
     return total
 
+def mix32(values, base):
+    y=list(values)
+    span=1
+    while span<INSTRUMENTS:
+        for i in range(0,INSTRUMENTS,2*span):
+            for j in range(i,i+span):
+                a=y[j]; b=y[j+span]
+                y[j]=(a+b)%base
+                y[j+span]=(a+2*b)%base
+        span*=2
+    return y
+
+def unmix32(values, base):
+    y=list(values)
+    span=INSTRUMENTS//2
+    while span>=1:
+        for i in range(0,INSTRUMENTS,2*span):
+            for j in range(i,i+span):
+                u=y[j]; v=y[j+span]
+                y[j]=(2*u-v)%base
+                y[j+span]=(v-u)%base
+        span//=2
+    return y
+
 def iter_pair_digits(src,alphabet):
     rank=[0]*256
     for i,b in enumerate(alphabet): rank[b]=i
@@ -50,11 +74,14 @@ def iter_pair_digits(src,alphabet):
             L=len(page); hf=(L+1)//2; hr=L//2
             for t in range((L+63)//64):
                 base=t*32
+                frame=[]
                 for i in range(32):
                     k=base+i
                     fv=rank[page[k]] if k<hf else 0
                     rv=rank[page[L-1-k]] if k<hr else 0
-                    yield fv + A*rv
+                    frame.append(fv + A*rv)
+                for mixed in mix32(frame,A*A):
+                    yield mixed
 
 def bytes_for_digits(base,count):
     if count<=0:return 0
@@ -108,7 +135,7 @@ def compose(src,msf):
         for c in iter(lambda:pf.read(8<<20),b''):out.write(c)
     tmp.unlink()
     theoretical=frames*INSTRUMENTS*math.log2(A*A)/8
-    return dict(source_bytes=n,alphabet_size=A,instruments=INSTRUMENTS,pitch_capacity=DECLARED_PITCHES,
+    return dict(source_bytes=n,alphabet_size=A,instruments=INSTRUMENTS,pitch_capacity=DECLARED_PITCHES,mixing='fixed_invertible_32way_butterfly',
                 page_count=pages,frame_count=frames,payload_bytes=pbytes,complete_msf_bytes=os.path.getsize(msf),
                 theoretical_field_bytes=theoretical,source_sha256=ss.hex(),payload_sha256=ph.hex())
 
@@ -144,8 +171,10 @@ def listen(msf,outpath):
         L=min(PAGE_SIZE,left);hf=(L+1)//2;hr=L//2
         for t in range((L+63)//64):
             base=t*32
-            for i in range(32):
-                x=next_digit();fv=x%A;rv=x//A;k=base+i
+            mixed=[next_digit() for _ in range(INSTRUMENTS)]
+            frame=unmix32(mixed,A*A)
+            for i,x in enumerate(frame):
+                fv=x%A;rv=x//A;k=base+i
                 if k<hf:out[off+k]=alphabet[fv]
                 if k<hr:out[off+L-1-k]=alphabet[rv]
         off+=L;left-=L
