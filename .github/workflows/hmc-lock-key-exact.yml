@@ -1,0 +1,123 @@
+name: HMC Lock Key exact benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-lock-key-20260918
+    paths:
+      - 'hmc/hmc_lock_key_counts_v1.cpp'
+      - '.github/workflows/hmc-lock-key-exact.yml'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip time
+      - name: Fetch canonical enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Build solver
+        run: |
+          g++ -O3 -std=c++17 hmc/hmc_lock_key_counts_v1.cpp -o hmc_lock_key
+          strip hmc_lock_key || true
+          stat -c 'DECODER_BYTES=%s' hmc_lock_key
+      - name: Sweep 10 MB
+        run: |
+          set -euxo pipefail
+          head -c 10000000 enwik9 > src10
+          D=$(stat -c%s hmc_lock_key)
+          printf "order\tlock_bytes\tlock_xz_bytes\tkey_bytes\tkey_xz_bytes\tforced\tambig\tforced_fraction\tcomplete_raw\tcomplete_lockxz_keyraw\texact\n" > lk10.tsv
+          for K in 1 2 3 4 5; do
+            /usr/bin/time -f "BUILD_SECONDS=%e MAXRSS_KB=%M" ./hmc_lock_key build src10 "k$K.lock" "k$K.key" "$K" 2> "k$K.build.log"
+            ./hmc_lock_key decode "k$K.lock" "k$K.key" "k$K.rec" 2> "k$K.decode.log"
+            cmp src10 "k$K.rec"
+            xz -9e --threads=1 -c "k$K.lock" > "k$K.lock.xz"
+            xz -9e --threads=1 -c "k$K.key" > "k$K.key.xz"
+            LOCK=$(stat -c%s "k$K.lock")
+            LOCKXZ=$(stat -c%s "k$K.lock.xz")
+            KEY=$(stat -c%s "k$K.key")
+            KEYXZ=$(stat -c%s "k$K.key.xz")
+            FORCED=$(grep '^LK_FORCED=' "k$K.build.log" | cut -d= -f2)
+            AMBIG=$(grep '^LK_AMBIG=' "k$K.build.log" | cut -d= -f2)
+            FRAC=$(grep '^LK_FORCED_FRACTION=' "k$K.build.log" | cut -d= -f2)
+            RAW=$((LOCK+KEY+D))
+            LX=$((LOCKXZ+KEY+D))
+            printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t1\n" "$K" "$LOCK" "$LOCKXZ" "$KEY" "$KEYXZ" "$FORCED" "$AMBIG" "$FRAC" "$RAW" "$LX" >> lk10.tsv
+          done
+          cat lk10.tsv
+          BEST=$(tail -n +2 lk10.tsv | sort -t$'\t' -k10,10n | head -1 | cut -f1)
+          echo "$BEST" > best_order.txt
+          echo "BEST_ORDER=$BEST"
+      - name: Test best neighborhood on 100 MB
+        run: |
+          set -euxo pipefail
+          head -c 100000000 enwik9 > src100
+          D=$(stat -c%s hmc_lock_key)
+          BEST=$(cat best_order.txt)
+          CANDS="$BEST"
+          if [ "$BEST" -gt 1 ]; then CANDS="$((BEST-1)) $CANDS"; fi
+          if [ "$BEST" -lt 5 ]; then CANDS="$CANDS $((BEST+1))"; fi
+          printf "order\tlock_bytes\tlock_xz_bytes\tkey_bytes\tkey_xz_bytes\tforced\tambig\tforced_fraction\tcomplete_raw\tcomplete_lockxz_keyraw\texact\n" > lk100.tsv
+          for K in $CANDS; do
+            /usr/bin/time -f "BUILD_SECONDS=%e MAXRSS_KB=%M" ./hmc_lock_key build src100 "p100_k$K.lock" "p100_k$K.key" "$K" 2> "p100_k$K.build.log"
+            ./hmc_lock_key decode "p100_k$K.lock" "p100_k$K.key" "p100_k$K.rec" 2> "p100_k$K.decode.log"
+            cmp src100 "p100_k$K.rec"
+            xz -9e --threads=1 -c "p100_k$K.lock" > "p100_k$K.lock.xz"
+            xz -9e --threads=1 -c "p100_k$K.key" > "p100_k$K.key.xz"
+            LOCK=$(stat -c%s "p100_k$K.lock")
+            LOCKXZ=$(stat -c%s "p100_k$K.lock.xz")
+            KEY=$(stat -c%s "p100_k$K.key")
+            KEYXZ=$(stat -c%s "p100_k$K.key.xz")
+            FORCED=$(grep '^LK_FORCED=' "p100_k$K.build.log" | cut -d= -f2)
+            AMBIG=$(grep '^LK_AMBIG=' "p100_k$K.build.log" | cut -d= -f2)
+            FRAC=$(grep '^LK_FORCED_FRACTION=' "p100_k$K.build.log" | cut -d= -f2)
+            RAW=$((LOCK+KEY+D))
+            LX=$((LOCKXZ+KEY+D))
+            printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t1\n" "$K" "$LOCK" "$LOCKXZ" "$KEY" "$KEYXZ" "$FORCED" "$AMBIG" "$FRAC" "$RAW" "$LX" >> lk100.tsv
+          done
+          cat lk100.tsv
+      - name: Result
+        run: |
+          python3 - <<'PY' | tee HMC_LOCK_KEY_RESULT.json
+          import csv,json,os
+          def load(p):
+              out=[]
+              with open(p) as f:
+                  for r in csv.DictReader(f,delimiter="\t"):
+                      q={}
+                      for k,v in r.items():
+                          if k=="forced_fraction": q[k]=float(v)
+                          elif k=="exact": q[k]=v=="1"
+                          else:q[k]=int(v)
+                      out.append(q)
+              return out
+          r10=load("lk10.tsv");r100=load("lk100.tsv")
+          w10=min(r10,key=lambda x:x["complete_lockxz_keyraw"])
+          w100=min(r100,key=lambda x:x["complete_lockxz_keyraw"])
+          print(json.dumps({
+            "codec":"HMC Lock-and-Key transition counts v1",
+            "decoder_bytes":os.path.getsize("hmc_lock_key"),
+            "10MB":{"winner":w10,"all":r10},
+            "100MB":{"winner":w100,"all":r100},
+            "score_definition":"compressed lock table + raw literal key + decoder; key positions are not stored"
+          },indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-lock-key-exact
+          path: |
+            HMC_LOCK_KEY_RESULT.json
+            lk10.tsv
+            lk100.tsv
+            *.log
+          if-no-files-found: warn
