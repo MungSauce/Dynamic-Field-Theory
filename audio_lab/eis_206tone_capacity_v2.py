@@ -105,3 +105,5 @@ if __name__=="__main__":
       "best_exact_16bit":min((r for r in valid if r["sample_bits"]==16),key=lambda r:r["wav_bytes_per_position"],default=None),
       "independent_206_onoff_control":arbitrary_206bit_state()
     },indent=2))
+
+# CANONICAL REPLICATION NOTICE (2026-09-18): predecessor/lineage artifact. Current protocol: compression/EIS_K32_FORMAL_REPLICATION_V1.md

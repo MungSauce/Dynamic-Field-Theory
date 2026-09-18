@@ -184,3 +184,8 @@ EIS supplies a physical/signal representation in which multiple page identities 
 v1 exists to answer one question:
 
 How many independently recoverable 206-way keyboard banks can one stored mixed frame carry exactly?
+
+
+---
+
+> **Canonical replication notice (2026-09-18):** This is predecessor/lineage material. Current protocol: [EIS-K32 Formal Replication v1.0](../compression/EIS_K32_FORMAL_REPLICATION_V1.md).

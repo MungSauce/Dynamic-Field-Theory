@@ -100,3 +100,5 @@ if __name__=="__main__":
     if a.cmd=="selftest": print(json.dumps(selftest(),indent=2))
     elif a.cmd=="encode": print("SOURCE_BYTES",encode(a.src,a.fullsrc,a.wav,a.map,a.limit))
     else: print("DECODED_BYTES",decode(a.wav,a.map,a.out))
+
+# CANONICAL REPLICATION NOTICE (2026-09-18): predecessor/lineage artifact. Current protocol: compression/EIS_K32_FORMAL_REPLICATION_V1.md

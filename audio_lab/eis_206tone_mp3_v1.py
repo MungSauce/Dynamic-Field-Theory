@@ -93,3 +93,5 @@ if __name__=="__main__":
     ap=argparse.ArgumentParser(); ap.add_argument("--outdir",default="mp3_206"); ap.add_argument("--symbols",type=int,default=4096)
     a=ap.parse_args()
     print(json.dumps(run(a.outdir,a.symbols),indent=2))
+
+# CANONICAL REPLICATION NOTICE (2026-09-18): predecessor/lineage artifact. Current protocol: compression/EIS_K32_FORMAL_REPLICATION_V1.md
