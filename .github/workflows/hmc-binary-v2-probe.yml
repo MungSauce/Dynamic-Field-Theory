@@ -1,0 +1,39 @@
+name: HMC binary-page v2 probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-generalized-20260918
+    paths:
+      - 'hmc/hmc_binary_v2_probe.py'
+      - '.github/workflows/hmc-binary-v2-probe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl unzip xz-utils
+          python3 -m pip install --quiet numpy
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Run 8 MiB binary-page probe
+        run: |
+          python3 hmc/hmc_binary_v2_probe.py enwik9 --prefix 8388608 --out hmc_binary_8m | tee HMC_BINARY_V2_STDOUT.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-binary-v2-probe
+          path: |
+            hmc_binary_8m.json
+            HMC_BINARY_V2_STDOUT.json
