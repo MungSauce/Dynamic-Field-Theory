@@ -16,3 +16,8 @@ Signals mixed into each activation-bit probability:
 All state is deterministic and reconstructed online. The only source-dependent retained state is the arithmetic-coded path plus the original length in the header.
 
 This is deliberately a first empirical baseline, not a claim of optimality.
+
+
+---
+
+> **Canonical replication notice (2026-09-18):** This is predecessor/lineage material. Current protocol: [EIS-K32 Formal Replication v1.0](../compression/EIS_K32_FORMAL_REPLICATION_V1.md).

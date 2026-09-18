@@ -91,3 +91,8 @@ Secondary:
 
 HMC-RP is successful only if relational inference removes enough ambiguity that the retained branch path is smaller than direct baselines.
 The puzzle framing itself does not receive compression credit; only exact measured path length does.
+
+
+---
+
+> **Canonical replication notice (2026-09-18):** This is predecessor/lineage material. Current protocol: [EIS-K32 Formal Replication v1.0](../compression/EIS_K32_FORMAL_REPLICATION_V1.md).

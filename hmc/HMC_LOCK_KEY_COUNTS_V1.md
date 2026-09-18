@@ -13,3 +13,8 @@ During decode:
 Thus key positions are not stored. The decoder itself determines every key-consumption point. Exact replay is possible from lock + key alone.
 
 All source-derived transition counts are serialized and counted as lock bytes.
+
+
+---
+
+> **Canonical replication notice (2026-09-18):** This is predecessor/lineage material. Current protocol: [EIS-K32 Formal Replication v1.0](../compression/EIS_K32_FORMAL_REPLICATION_V1.md).
