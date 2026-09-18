@@ -1,0 +1,161 @@
+name: HMC Domino EIS benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-domino-eis-20260918
+    paths:
+      - 'hmc/hmc_domino_v4.cpp'
+      - 'hmc/hmc_eis_bridge.py'
+      - 'audio_lab/orchestral_qam_v2.py'
+      - '.github/workflows/hmc-domino-eis.yml'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip flac time
+          python3 -m pip install --quiet numpy
+
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+
+      - name: Build Domino v4
+        run: |
+          g++ -O3 -std=c++17 hmc/hmc_domino_v4.cpp -o hmc_domino_v4
+          strip hmc_domino_v4 || true
+          stat -c 'HMC_DECODER_BYTES=%s' hmc_domino_v4
+
+      - name: Tune Domino v4 on 10 MB
+        run: |
+          set -euxo pipefail
+          head -c 10000000 enwik9 > src10
+          : > hmc_v4_tune.tsv
+          printf "minmatch\tcarrier_bytes\texact\n" >> hmc_v4_tune.tsv
+          for M in 4 6 8 12; do
+            ./hmc_domino_v4 e src10 "v4_m$M.hcd" "$M" 2> "v4_m$M.enc.log"
+            ./hmc_domino_v4 d "v4_m$M.hcd" "v4_m$M.rec" 2> "v4_m$M.dec.log"
+            cmp src10 "v4_m$M.rec"
+            printf "%s\t%s\t1\n" "$M" "$(stat -c%s "v4_m$M.hcd")" >> hmc_v4_tune.tsv
+          done
+          cat hmc_v4_tune.tsv
+          BEST=$(tail -n +2 hmc_v4_tune.tsv | sort -t$'\t' -k2,2n | head -1 | cut -f1)
+          cp "v4_m$BEST.hcd" src10.best.hcd
+          echo "$BEST" > best_minmatch.txt
+          echo "BEST_MINMATCH=$BEST"
+
+      - name: Sweep EIS on 10 MB HMC carrier
+        run: |
+          set -euxo pipefail
+          python3 hmc/hmc_eis_bridge.py src10 src10.best.hcd ./hmc_domino_v4 \
+            --sr 48000 --block 64 --carriers 31 --bits-axis 12 --sample-bits 16 --drive 1.4 \
+            --out-prefix eis_48k16_a12 | tee eis_48k16_a12.json
+          python3 hmc/hmc_eis_bridge.py src10 src10.best.hcd ./hmc_domino_v4 \
+            --sr 48000 --block 64 --carriers 31 --bits-axis 21 --sample-bits 24 --drive 1.4 \
+            --out-prefix eis_48k24_a21 | tee eis_48k24_a21.json
+          python3 hmc/hmc_eis_bridge.py src10 src10.best.hcd ./hmc_domino_v4 \
+            --sr 96000 --block 64 --carriers 31 --bits-axis 21 --sample-bits 24 --drive 1.4 \
+            --out-prefix eis_96k24_a21 | tee eis_96k24_a21.json
+
+      - name: Select EIS configuration
+        run: |
+          python3 - <<'PY' | tee EIS_SELECTION.json
+          import glob,json
+          rows=[]
+          for p in glob.glob("eis_*.json"):
+              d=json.load(open(p))
+              if d.get("end_to_end_exact") and d.get("eis_carrier_exact"):
+                  choices={
+                    "wav":d["complete_eis_wav_bytes"],
+                    "flac":d["complete_eis_flac_bytes"],
+                    "wav_xz":d["complete_eis_wav_xz_bytes"]
+                  }
+                  kind=min(choices,key=choices.get)
+                  rows.append({
+                    "file":p,"kind":kind,"complete_bytes":choices[kind],
+                    "sr":d["sr"],"block":d["block_samples"],"carriers":d["carriers"],
+                    "bits_axis":d["bits_axis"],"channels":d["channels"],
+                    "sample_bits":d["sample_bits"],"drive":d["fft_drive"],
+                    "hmc_carrier_bytes":d["hmc_carrier_bytes"]
+                  })
+          if not rows: raise SystemExit("no exact EIS configuration")
+          rows.sort(key=lambda x:x["complete_bytes"])
+          print(json.dumps({"winner":rows[0],"all":rows},indent=2))
+          open("winner_env.txt","w").write(
+              f'SR={rows[0]["sr"]}\nBLOCK={rows[0]["block"]}\nCARRIERS={rows[0]["carriers"]}\n'
+              f'BITS_AXIS={rows[0]["bits_axis"]}\nCHANNELS={rows[0]["channels"]}\n'
+              f'SAMPLE_BITS={rows[0]["sample_bits"]}\nDRIVE={rows[0]["drive"]}\n')
+          PY
+          cat winner_env.txt
+
+      - name: Run winning chain on 100 MB
+        run: |
+          set -euxo pipefail
+          source winner_env.txt
+          BEST=$(cat best_minmatch.txt)
+          head -c 100000000 enwik9 > src100
+          /usr/bin/time -v ./hmc_domino_v4 e src100 src100.hcd "$BEST" 2> src100.hmc.enc.log
+          /usr/bin/time -v ./hmc_domino_v4 d src100.hcd src100.hmc.rec 2> src100.hmc.dec.log
+          cmp src100 src100.hmc.rec
+          python3 hmc/hmc_eis_bridge.py src100 src100.hcd ./hmc_domino_v4 \
+            --sr "$SR" --block "$BLOCK" --carriers "$CARRIERS" --bits-axis "$BITS_AXIS" \
+            --channels "$CHANNELS" --sample-bits "$SAMPLE_BITS" --drive "$DRIVE" \
+            --out-prefix eis100 | tee HMC_DOMINO_EIS_100MB.json
+
+      - name: Final accounting
+        run: |
+          python3 - <<'PY' | tee HMC_DOMINO_EIS_RESULT.json
+          import json,os
+          s10=json.load(open("EIS_SELECTION.json"))
+          d=json.load(open("HMC_DOMINO_EIS_100MB.json"))
+          choices={
+            "wav":d["complete_eis_wav_bytes"],
+            "flac":d["complete_eis_flac_bytes"],
+            "wav_xz":d["complete_eis_wav_xz_bytes"]
+          }
+          best_kind=min(choices,key=choices.get)
+          result={
+            "chain":"enwik9 prefix -> HMC Domino v4 -> EIS -> HMC Domino v4 -> exact source",
+            "hmc_minmatch":int(open("best_minmatch.txt").read()),
+            "10MB_eis_selection":s10,
+            "100MB":{
+              "source_bytes":d["source_bytes"],
+              "hmc_carrier_bytes":d["hmc_carrier_bytes"],
+              "complete_hmc_bytes":d["complete_hmc_bytes"],
+              "eis_best_kind":best_kind,
+              "eis_best_complete_bytes":choices[best_kind],
+              "eis_best_ratio_vs_source":choices[best_kind]/d["source_bytes"],
+              "eis_best_compression_fraction":1-choices[best_kind]/d["source_bytes"],
+              "wav_bytes":d["wav_bytes"],
+              "flac_bytes":d["flac_bytes"],
+              "wav_xz_bytes":d["wav_xz_bytes"],
+              "end_to_end_exact":d["end_to_end_exact"],
+              "eis_carrier_exact":d["eis_carrier_exact"]
+            }
+          }
+          print(json.dumps(result,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-domino-eis
+          path: |
+            HMC_DOMINO_EIS_RESULT.json
+            HMC_DOMINO_EIS_100MB.json
+            EIS_SELECTION.json
+            hmc_v4_tune.tsv
+            *.log
+          if-no-files-found: warn
