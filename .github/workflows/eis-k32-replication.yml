@@ -1,0 +1,70 @@
+name: EIS-K32 formal replication
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - eis-k32-formal-replication-20260918
+    paths:
+      - 'eis_k32/**'
+      - 'compression/EIS_K32_FORMAL_REPLICATION_V1.md'
+      - '.github/workflows/eis-k32-replication.yml'
+
+jobs:
+  replicate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install numpy
+        run: python3 -m pip install --quiet numpy
+      - name: Create deterministic source
+        run: |
+          python3 - <<'PY'
+          import random
+          r=random.Random(320206)
+          data=bytes(r.randrange(256) for _ in range(1048576))
+          open("source.bin","wb").write(data)
+          PY
+          sha256sum source.bin | tee source.sha256
+      - name: Compose EIS-K32
+        run: |
+          python3 eis_k32/composer_encoder.py source.bin source.eis --frame-samples 96 --drive 1.0 | tee compose.log
+      - name: Cold replay
+        run: |
+          mv source.bin source.removed
+          python3 eis_k32/listener_decoder.py source.eis recovered.bin --drive 1.0 | tee listen.log
+          cmp source.removed recovered.bin
+          sha256sum source.removed recovered.bin
+      - name: Accounting
+        run: |
+          python3 - <<'PY' | tee EIS_K32_REPLICATION_RESULT.json
+          import hashlib,json,os
+          src=open("source.removed","rb").read()
+          rec=open("recovered.bin","rb").read()
+          eis=os.path.getsize("source.eis")
+          out={
+            "protocol":"EIS-K32 Formal Replication v1.0",
+            "source_bytes":len(src),
+            "eis_complete_bytes":eis,
+            "header_bytes":128,
+            "payload_bytes":eis-128,
+            "lanes":32,
+            "symbols_per_frame":32,
+            "frame_samples":96,
+            "sample_bits":16,
+            "ratio_vs_source":eis/len(src),
+            "exact":src==rec,
+            "source_sha256":hashlib.sha256(src).hexdigest(),
+            "recovered_sha256":hashlib.sha256(rec).hexdigest()
+          }
+          print(json.dumps(out,indent=2))
+          if not out["exact"]: raise SystemExit(3)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eis-k32-formal-replication
+          path: |
+            EIS_K32_REPLICATION_RESULT.json
+            compose.log
+            listen.log
