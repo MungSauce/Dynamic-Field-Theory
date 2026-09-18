@@ -14,7 +14,7 @@ This is an engineering probe, not a compression claim. It measures the maximum
 zero-error payload rate that survives MP3 for this signaling family.
 """
 from __future__ import annotations
-import argparse, hashlib, json, math, os, subprocess, wave
+import argparse, hashlib, json, math, os, subprocess, wave, lzma, bz2, gzip
 from array import array
 from pathlib import Path
 
@@ -256,6 +256,27 @@ def main():
     full_seconds_est = (1_000_000_000 * 8) / meta["payload_bps_nominal"]
     full_mp3_est = args.bitrate * 1000.0 / 8.0 * full_seconds_est
 
+    mp3_blob = Path(mp3).read_bytes()
+    xz_blob = lzma.compress(mp3_blob, format=lzma.FORMAT_XZ, preset=lzma.PRESET_EXTREME | 9)
+    bz2_blob = bz2.compress(mp3_blob, compresslevel=9)
+    gz_blob = gzip.compress(mp3_blob, compresslevel=9, mtime=0)
+    # Verify the outer compression layers are exact representations of the MP3 bitstream.
+    assert lzma.decompress(xz_blob) == mp3_blob
+    assert bz2.decompress(bz2_blob) == mp3_blob
+    assert gzip.decompress(gz_blob) == mp3_blob
+    outer = {
+        "mp3_raw_bytes": len(mp3_blob),
+        "mp3_xz9e_bytes": len(xz_blob),
+        "mp3_bz2_bytes": len(bz2_blob),
+        "mp3_gzip9_bytes": len(gz_blob),
+    }
+    outer["best_lossless_outer"] = min(
+        (("xz9e", len(xz_blob)), ("bz2", len(bz2_blob)), ("gzip9", len(gz_blob))),
+        key=lambda x: x[1]
+    )[0]
+    outer["best_lossless_outer_bytes"] = min(len(xz_blob), len(bz2_blob), len(gz_blob))
+    outer["best_outer_ratio_vs_mp3"] = outer["best_lossless_outer_bytes"] / len(mp3_blob) if mp3_blob else 1.0
+
     result = {
         "codec": "staggered_multicarrier_v1",
         "lanes": LANES,
@@ -275,6 +296,7 @@ def main():
         "measured_audio_seconds": duration_sec,
         "effective_payload_bps_including_preamble": payload_bps_effective,
         "mp3_bytes": os.path.getsize(mp3),
+        "outer_lossless_compression": outer,
         "errors": errors,
         "exact": exact,
         "recovered_sha256": sha256_bytes(rec) if len(rec) == len(data) else None,
