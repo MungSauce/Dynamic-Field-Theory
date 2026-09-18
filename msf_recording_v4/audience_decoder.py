@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse,hashlib,json
 from pathlib import Path
 from msf_format import HEADER_SIZE,parse_header
-from signal_basis import page_bounds,instrument_slot,remove_modifier
+from signal_basis import page_bounds,remove_modifier,unmix_field,spectral_unpermute
 
 def listen(msf,output):
     msf=Path(msf);output=Path(output)
@@ -19,19 +19,20 @@ def listen(msf,output):
     out=bytearray(n)
     # The audience knows only the generic signal basis. Each conceptual listener
     # reads its procedural basis coefficient from the one scalar recording sample.
-    slots=[instrument_slot(i,N) for i in range(N)]
-    instrument_for_slot=[0]*N
-    for i,s in enumerate(slots): instrument_for_slot[s]=i
+
     off=0
     for t in range(frames):
         sample=int.from_bytes(payload[off:off+sb],"little");off+=sb
-        slot_digits=[0]*N
+        recorded_coeffs=[0]*N
         for s in range(N):
             sample,y=divmod(sample,B)
-            slot_digits[s]=y
+            recorded_coeffs[s]=y
         if sample: raise ValueError("noncanonical scalar sample")
-        for slot,y in enumerate(slot_digits):
-            i=instrument_for_slot[slot]
+
+        # Audience analysis bank: undo spectral ordering and the full-orchestra
+        # mix, then demodulate each instrument's known timbre.
+        states=unmix_field(spectral_unpermute(recorded_coeffs),B)
+        for i,y in enumerate(states):
             pair=remove_modifier(y,i,B);fv=pair%A;rv=pair//A
             s,e=page_bounds(n,N,i);L=e-s
             if t<(L+1)//2:out[s+t]=alphabet[fv]
