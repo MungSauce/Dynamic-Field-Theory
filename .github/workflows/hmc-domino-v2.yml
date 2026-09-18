@@ -1,0 +1,88 @@
+name: HMC Domino v2 benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-cascade-20260918
+    paths:
+      - 'hmc/hmc_domino_v2.cpp'
+      - '.github/workflows/hmc-domino-v2.yml'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip time
+      - name: Fetch enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Build
+        run: |
+          g++ -O3 -std=c++17 hmc/hmc_domino_v2.cpp -o hmc_domino_v2
+          strip hmc_domino_v2 || true
+      - name: Tune on 10 MB
+        run: |
+          set -euxo pipefail
+          head -c 10000000 enwik9 > src10
+          : > tune.tsv
+          printf "minmatch\tcarrier_bytes\texact\n" >> tune.tsv
+          for M in 4 6 8 12 16; do
+            ./hmc_domino_v2 e src10 "m$M.hcd" "$M" 2> "m$M.enc.log"
+            ./hmc_domino_v2 d "m$M.hcd" "m$M.rec" 2> "m$M.dec.log"
+            cmp src10 "m$M.rec"
+            printf "%s\t%s\t1\n" "$M" "$(stat -c%s "m$M.hcd")" >> tune.tsv
+          done
+          cat tune.tsv
+          BEST=$(tail -n +2 tune.tsv | sort -t$'\t' -k2,2n | head -1 | cut -f1)
+          echo "$BEST" > best_minmatch.txt
+          echo "BEST_MINMATCH=$BEST"
+      - name: Scale winner
+        run: |
+          set -euxo pipefail
+          BEST=$(cat best_minmatch.txt)
+          : > domino.tsv
+          printf "source_bytes\tminmatch\tcarrier_bytes\tcomplete_bytes\tbpa\txz_bytes\texact\n" >> domino.tsv
+          for N in 1000000 10000000 100000000; do
+            head -c "$N" enwik9 > "src_$N"
+            /usr/bin/time -f "ENCODE_SECONDS=%e" ./hmc_domino_v2 e "src_$N" "src_$N.hcd" "$BEST" 2> "enc_$N.log"
+            /usr/bin/time -f "DECODE_SECONDS=%e" ./hmc_domino_v2 d "src_$N.hcd" "rec_$N" 2> "dec_$N.log"
+            cmp "src_$N" "rec_$N"
+            xz -9e --threads=1 -c "src_$N" > "src_$N.xz"
+            python3 - "$N" "$BEST" <<'PY' >> domino.tsv
+          import os,sys
+          n=int(sys.argv[1]);m=int(sys.argv[2]);c=os.path.getsize(f"src_{n}.hcd");d=os.path.getsize("hmc_domino_v2");x=os.path.getsize(f"src_{n}.xz")
+          print(f"{n}\t{m}\t{c}\t{c+d}\t{8*(c+d)/n:.9f}\t{x}\t1")
+          PY
+          done
+          cat domino.tsv
+      - name: Result
+        run: |
+          python3 - <<'PY' | tee HMC_DOMINO_V2_RESULT.json
+          import csv,json,os
+          with open("domino.tsv") as f:
+              rows=[]
+              for r in csv.DictReader(f,delimiter="\t"):
+                  rows.append({
+                    "source_bytes":int(r["source_bytes"]),"minmatch":int(r["minmatch"]),
+                    "carrier_bytes":int(r["carrier_bytes"]),"complete_bytes":int(r["complete_bytes"]),
+                    "bpa":float(r["bpa"]),"xz_bytes":int(r["xz_bytes"]),"exact":r["exact"]=="1"
+                  })
+          print(json.dumps({"codec":"HMC Domino v2","decoder_bytes":os.path.getsize("hmc_domino_v2"),"rows":rows},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-domino-v2
+          path: |
+            HMC_DOMINO_V2_RESULT.json
+            tune.tsv
+            domino.tsv
+            *.log
