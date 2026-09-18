@@ -74,26 +74,32 @@ No capacity is added as chronology advances.
 
 ## Signed-binary live-zero motif
 
-One logical binary relation is a pair of active graph weights.
+One logical binary relation is centered on a pair of active graph weights.
 
 ```
 dead zero:       ( 0, 0)
-live zero A:     (+1,-1)
-live zero B:     (-1,+1)
+live zero:       (+1,-1) or (-1,+1)
 ```
 
-Both live states have:
+Both live arrangements have:
 
 ```
 sum = 0
 activity = 2
 ```
 
-but opposite orientation.
+The crucial distinction is therefore not scalar amplitude but **presence plus relational orientation**.
 
-A binary bit is therefore carried by the orientation of a balanced relation, not by net amplitude.
+Because an isolated (+1,-1) pair has a global sign symmetry, its logical orientation is read relative to a third active graph relation selected by the same source-independent routing law:
 
-Generic chronology/context modifiers may invert the interpretation; the decoder regenerates the same modifiers.
+```
+live-zero condition:  sign(a) != sign(b)
+bit orientation:      sign(a) relative to sign(reference)
+```
+
+The bit is therefore entirely relational. No node or edge is assigned a universal absolute + or - meaning.
+
+Generic chronology/context modifiers may invert the relational interpretation; the decoder regenerates the same modifiers.
 
 ## Terminal representation
 
@@ -104,10 +110,11 @@ The byte-to-terminal map is source-dependent metadata and is serialized/counted.
 ## Training
 
 For each terminal bit:
-1. q, k, previous decoded context and bit index select two fixed graph-edge slots;
-2. the current target plus generic modifier determines orientation;
-3. training imposes that the two selected edges are active and opposing;
-4. all earlier constraints remain in force.
+1. q, k, previous decoded context and bit index select three fixed graph-edge slots: a, b, and reference;
+2. training requires a and b to be active and opposing, producing live zero;
+3. the current target plus generic modifier determines whether a is the same or opposite orientation as the reference edge;
+4. no absolute sign is taught;
+5. all earlier constraints remain in force.
 
 If an existing graph component makes the requested orientation impossible, the settling law fails at that exact chronology.
 
