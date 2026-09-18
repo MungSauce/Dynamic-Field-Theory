@@ -19,3 +19,22 @@ For N instruments:
 - recording samples per timestamp = N complex machine samples in this reference realization
 
 The last line is deliberately measured rather than hidden: this reference signal basis pays N stored samples per timestamp. The experiment establishes whether later signal/transport refinements can lower that sample cost while preserving exact separability.
+
+
+## Measured 100 MB reference result
+
+The strict v3 cold-replay test on the first 100,000,000 bytes of enwik9 passed exact reconstruction with the source and orchestra encoder removed before audience decode.
+
+Measured at N=128:
+- pages: 128
+- shared directional lexicon: 410 identities (205-symbol source alphabet × two directions)
+- source positions per full timestamp: 256
+- timestamps: 390,625
+- recorded complex samples: 50,000,000
+- recorded signal payload: 100,000,000 bytes
+- primary signal ratio: 1.00000000
+- primary signal compression: 0.000000%
+- complete .msf including metadata: 100,000,389 bytes
+- exact cold replay: PASS
+
+This identifies the current reference basis failure mode precisely: page/time compression works, but storing N two-byte signal samples per timestamp cancels it one-for-one. The next optimization target is the recording basis itself, not page geometry or the audience boundary.
