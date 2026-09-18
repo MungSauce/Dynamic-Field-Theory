@@ -1,0 +1,83 @@
+name: HMC v2 binary page probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-generalized-20260918
+    paths:
+      - 'hmc/hmc_v2_binary.cpp'
+      - '.github/workflows/hmc-v2-binary-probe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip
+      - name: Fetch canonical enwik9 and make 64 MiB probe
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+          head -c 67108864 enwik9 > probe.bin
+      - name: Build
+        run: |
+          g++ -O3 -std=c++17 hmc/hmc_v2_binary.cpp -o hmc_v2
+          strip hmc_v2 || true
+      - name: Frequency-descending HMC
+        run: |
+          set -euxo pipefail
+          /usr/bin/time -v ./hmc_v2 e probe.bin probe.hmc2 freq-desc 2> hmc2_encode.log
+          /usr/bin/time -v ./hmc_v2 d probe.hmc2 probe.recovered 2> hmc2_decode.log
+          cmp probe.bin probe.recovered
+          xz -9e --threads=1 -c probe.hmc2 > probe.hmc2.xz
+          xz -dc probe.hmc2.xz > probe.hmc2.roundtrip
+          ./hmc_v2 d probe.hmc2.roundtrip probe.roundtrip.recovered
+          cmp probe.bin probe.roundtrip.recovered
+      - name: Direct binary control
+        run: |
+          xz -9e --threads=1 -c probe.bin > probe.raw.xz
+      - name: Report
+        run: |
+          python3 - <<'PY' | tee HMC_V2_RESULT.json
+          import hashlib,json,os,re
+          def h(p):
+              x=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(1<<20),b''):x.update(b)
+              return x.hexdigest()
+          src=os.path.getsize('probe.bin')
+          log=open('hmc2_encode.log',errors='replace').read()
+          m=re.search(r'HMC2_STORED_BINARY_DECISIONS=(\d+)',log)
+          d={
+              'source_bytes':src,
+              'source_sha256':h('probe.bin'),
+              'hmc2_raw_bytes':os.path.getsize('probe.hmc2'),
+              'hmc2_xz9e_bytes':os.path.getsize('probe.hmc2.xz'),
+              'raw_xz9e_bytes':os.path.getsize('probe.raw.xz'),
+              'decoder_bytes':os.path.getsize('hmc_v2'),
+              'stored_binary_decisions':int(m.group(1)) if m else None,
+              'decisions_per_source_byte':(int(m.group(1))/src if m else None),
+              'hmc2_raw_ratio':os.path.getsize('probe.hmc2')/src,
+              'hmc2_xz_ratio':os.path.getsize('probe.hmc2.xz')/src,
+              'raw_xz_ratio':os.path.getsize('probe.raw.xz')/src,
+              'exact_hmc2':h('probe.bin')==h('probe.recovered'),
+              'exact_hmc2_xz':h('probe.bin')==h('probe.roundtrip.recovered'),
+          }
+          print(json.dumps(d,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-v2-binary-probe
+          path: |
+            HMC_V2_RESULT.json
+            hmc2_encode.log
+            hmc2_decode.log
