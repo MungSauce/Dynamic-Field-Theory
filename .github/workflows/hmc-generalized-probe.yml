@@ -1,0 +1,79 @@
+name: HMC generalized occupancy probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-generalized-20260918
+    paths:
+      - 'hmc/**'
+      - '.github/workflows/hmc-generalized-probe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip
+      - name: Fetch canonical enwik9 and make probe
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+          head -c 67108864 enwik9 > probe.bin
+      - name: Build
+        run: |
+          g++ -O3 -std=c++17 hmc/hmc_v1.cpp -o hmc_v1
+          strip hmc_v1 || true
+      - name: Encode and exact decode
+        run: |
+          set -euxo pipefail
+          /usr/bin/time -v ./hmc_v1 encode probe.bin probe.hmc 2> hmc_encode.log
+          /usr/bin/time -v ./hmc_v1 decode probe.hmc probe.recovered 2> hmc_decode.log
+          cmp probe.bin probe.recovered
+          sha256sum probe.bin probe.recovered
+      - name: Compression controls
+        run: |
+          set -euxo pipefail
+          xz -9e --threads=1 -c probe.bin > probe.raw.xz
+          xz -9e --threads=1 -c probe.hmc > probe.hmc.xz
+          xz -dc probe.hmc.xz > probe.hmc.roundtrip
+          ./hmc_v1 decode probe.hmc.roundtrip probe.roundtrip.recovered
+          cmp probe.bin probe.roundtrip.recovered
+          python3 - <<'PY' | tee HMC_PROBE_RESULT.json
+          import json, os, hashlib
+          def h(p):
+              x=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(1<<20),b''): x.update(b)
+              return x.hexdigest()
+          src=os.path.getsize('probe.bin')
+          d={
+            'source_bytes':src,
+            'source_sha256':h('probe.bin'),
+            'hmc_raw_bytes':os.path.getsize('probe.hmc'),
+            'hmc_xz9e_bytes':os.path.getsize('probe.hmc.xz'),
+            'raw_xz9e_bytes':os.path.getsize('probe.raw.xz'),
+            'hmc_raw_ratio':os.path.getsize('probe.hmc')/src,
+            'hmc_xz_ratio':os.path.getsize('probe.hmc.xz')/src,
+            'raw_xz_ratio':os.path.getsize('probe.raw.xz')/src,
+            'exact_hmc':h('probe.bin')==h('probe.recovered'),
+            'exact_hmc_xz':h('probe.bin')==h('probe.roundtrip.recovered'),
+            'decoder_bytes':os.path.getsize('hmc_v1'),
+          }
+          print(json.dumps(d,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-generalized-probe
+          path: |
+            HMC_PROBE_RESULT.json
+            hmc_encode.log
+            hmc_decode.log
