@@ -1,0 +1,107 @@
+name: HMC full canonical enwik9
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-generalized-20260918
+    paths:
+      - '.github/workflows/hmc-full-enwik9.yml'
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip time
+
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+
+      - name: Build HMC
+        run: |
+          g++ -O3 -std=c++17 hmc/hmc_v1.cpp -o hmc_v1
+          strip hmc_v1 || true
+          stat -c 'HMC_DECODER_BYTES=%s' hmc_v1 | tee hmc_decoder_size.txt
+
+      - name: Fill HMC with full corpus
+        run: |
+          set -euxo pipefail
+          /usr/bin/time -v ./hmc_v1 encode enwik9 enwik9.hmc 2> hmc_full_encode.log
+          stat -c 'HMC_CARRIER_BYTES=%s' enwik9.hmc | tee hmc_carrier_size.txt
+
+      - name: Cold exact reconstruction
+        run: |
+          set -euxo pipefail
+          mv enwik9 enwik9.hidden
+          /usr/bin/time -v ./hmc_v1 decode enwik9.hmc enwik9.recovered 2> hmc_full_decode.log
+          test "$(stat -c%s enwik9.recovered)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9.recovered" | sha256sum -c -
+          mv enwik9.hidden enwik9
+
+      - name: Lossless outer-compression measurement
+        run: |
+          set -euxo pipefail
+          xz -9e --threads=1 -c enwik9.hmc > enwik9.hmc.xz
+          xz -dc enwik9.hmc.xz > enwik9.hmc.roundtrip
+          cmp enwik9.hmc enwik9.hmc.roundtrip
+          ./hmc_v1 decode enwik9.hmc.roundtrip enwik9.outer.recovered
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9.outer.recovered" | sha256sum -c -
+
+      - name: Write result ledger
+        run: |
+          python3 - <<'PY' | tee HMC_FULL_ENWIK9_RESULT.json
+          import json, os, hashlib, re
+          def sha(p):
+              h=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(8<<20),b''): h.update(b)
+              return h.hexdigest()
+          src=1_000_000_000
+          carrier=os.path.getsize('enwik9.hmc')
+          outer=os.path.getsize('enwik9.hmc.xz')
+          dec=os.path.getsize('hmc_v1')
+          text=open('hmc_full_encode.log',errors='replace').read()
+          m=re.search(r'HMC_SYMBOL_PAGES=(\d+)',text)
+          pages=int(m.group(1)) if m else None
+          result={
+              'codec':'HMC-v1-gap-instruction',
+              'source_bytes':src,
+              'source_sha256':'159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc',
+              'symbol_pages':pages,
+              'carrier_bytes':carrier,
+              'decoder_bytes':dec,
+              'complete_bytes':carrier+dec,
+              'complete_ratio_vs_source':(carrier+dec)/src,
+              'compression_fraction':1-(carrier+dec)/src,
+              'outer_xz_bytes':outer,
+              'outer_complete_bytes':outer+dec,
+              'outer_complete_ratio_vs_source':(outer+dec)/src,
+              'outer_compression_fraction':1-(outer+dec)/src,
+              'exact_cold_reconstruction':sha('enwik9.recovered')=='159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc',
+              'exact_outer_reconstruction':sha('enwik9.outer.recovered')=='159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc'
+          }
+          print(json.dumps(result,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-full-enwik9-result
+          path: |
+            HMC_FULL_ENWIK9_RESULT.json
+            hmc_full_encode.log
+            hmc_full_decode.log
+            hmc_decoder_size.txt
+            hmc_carrier_size.txt
+          if-no-files-found: warn
