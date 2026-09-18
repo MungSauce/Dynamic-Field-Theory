@@ -2,6 +2,11 @@ name: TRUECSS original composite 100MB probe
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/truecss_original_composite_v1.cpp'
+      - 'docs/TRUECSS_ORIGINAL_COMPOSITE_V1.md'
+      - '.github/workflows/truecss-original-composite-100mb.yml'
 
 jobs:
   probe:
