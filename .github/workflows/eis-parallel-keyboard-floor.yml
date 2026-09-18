@@ -1,0 +1,81 @@
+name: EIS parallel keyboard packing floor
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-eis-206tone-20260918
+    paths:
+      - '.github/workflows/eis-parallel-keyboard-floor.yml'
+
+jobs:
+  floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          ok=0
+          for attempt in 1 2 3 4 5 6 7 8; do
+            rm -f enwik9.zip
+            curl -A "Mozilla/5.0" -L --fail --connect-timeout 30 --max-time 300 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip || true
+            if [ -f enwik9.zip ] && [ "$(stat -c%s enwik9.zip)" -gt 300000000 ] && unzip -tq enwik9.zip >/dev/null 2>&1; then ok=1; break; fi
+            sleep 10
+          done
+          test "$ok" = "1"
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Measure optimal lane allocation
+        run: |
+          python3 - <<'PY' | tee EIS_PARALLEL_KEYBOARD_FLOOR.json
+          import collections,heapq,json,math,os
+          cnt=collections.Counter()
+          with open("enwik9","rb") as f:
+              while True:
+                  b=f.read(8<<20)
+                  if not b: break
+                  cnt.update(b)
+          items=sorted(cnt.items())
+          assert len(items)==206, len(items)
+          N=sum(cnt.values())
+          def alloc(K):
+              # Every observed byte gets at least one tone lane.
+              lanes={c:1 for c,_ in items}
+              # Greedily allocate duplicate lanes to the currently busiest per-lane symbol.
+              # Recompute with heap using ceil(count/lanes).
+              extras=K-len(items)
+              for _ in range(extras):
+                  c=max(lanes, key=lambda x:(math.ceil(cnt[x]/lanes[x]),cnt[x]))
+                  lanes[c]+=1
+              T=max(math.ceil(cnt[c]/m) for c,m in lanes.items())
+              used=sum(lanes.values())
+              utilization=N/(used*T)
+              top=sorted(((cnt[c],c,lanes[c],math.ceil(cnt[c]/lanes[c])) for c in lanes),reverse=True)[:20]
+              return {
+                "carriers":K,"ticks":T,"utilization":utilization,
+                "ideal_8bit_mono_wav_bytes_one_sample_per_tick":44+T,
+                "ideal_16bit_mono_wav_bytes_one_sample_per_tick":44+2*T,
+                "ideal_raw_track_mb_8bit":(44+T)/1e6,
+                "ideal_raw_track_mb_16bit":(44+2*T)/1e6,
+                "top_lane_loads":[{"byte":c,"count":n,"lanes":m,"ticks":t} for n,c,m,t in top],
+                "lanes_by_byte":{str(c):lanes[c] for c,_ in items}
+              }
+          out={
+            "source_bytes":N,
+            "distinct_bytes":len(items),
+            "counts":{str(c):cnt[c] for c,_ in items},
+            "floor_206":alloc(206),
+            "floor_412":alloc(412),
+            "floor_824":alloc(824),
+            "floor_1648":alloc(1648),
+            "important_note":"These are scheduling/packing floors only. They assume one recoverable carrier decision per PCM sample and do not include the ordering/key information or frequency-separation time-bandwidth cost."
+          }
+          print(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eis-parallel-keyboard-floor
+          path: EIS_PARALLEL_KEYBOARD_FLOOR.json
