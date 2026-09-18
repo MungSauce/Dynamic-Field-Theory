@@ -8,6 +8,10 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static void put_u16(std::ostream&o,uint16_t v){o.put(char(v&255));o.put(char(v>>8));}
 static uint16_t get_u16(std::istream&i){int a=i.get(),b=i.get();if(a<0||b<0)throw std::runtime_error("short u16");return uint16_t(a|(b<<8));}
@@ -31,7 +35,11 @@ struct BitWriter{
 
 struct BitReader{
     std::ifstream in; uint8_t cur=0; int used=8; uint64_t remaining;
-    BitReader(const std::string&p,uint64_t bytes):in(p,std::ios::binary),remaining(bytes){if(!in)throw std::runtime_error("open bitreader");}
+    BitReader(const std::string&p,uint64_t offset,uint64_t bytes):in(p,std::ios::binary),remaining(bytes){
+        if(!in)throw std::runtime_error("open bitreader");
+        in.seekg((std::streamoff)offset);
+        if(!in)throw std::runtime_error("bitreader seek");
+    }
     int bit(){
         if(used==8){if(!remaining)throw std::runtime_error("bitreader exhausted");int c=in.get();if(c<0)throw std::runtime_error("short bitreader");cur=uint8_t(c);used=0;remaining--;}
         return (cur>>(7-used++))&1;
@@ -42,7 +50,6 @@ struct BitReader{
         uint64_t r=k?bits_msb(k):0; return (q<<k)|r;
     }
 };
-
 static int choose_k(uint64_t total,uint64_t count){
     if(!count || count>=total)return 0;
     long double mean=(long double)(total-count)/(long double)count;
@@ -116,37 +123,38 @@ static void decode(const std::string&src,const std::string&dst){
     uint64_t off=(uint64_t)in.tellg(),sum=off;
     for(auto &x:p){x.off=sum;sum+=x.bytes;}
     if(sum!=fsize(src))throw std::runtime_error("carrier size mismatch");
+    in.close();
 
-    std::fstream out(dst,std::ios::binary|std::ios::out|std::ios::trunc);if(!out)throw std::runtime_error("open output");
-    if(total){out.seekp((std::streamoff)(total-1));out.put('\0');out.flush();}
-    out.close();
-
-    std::fstream rw(dst,std::ios::binary|std::ios::in|std::ios::out);if(!rw)throw std::runtime_error("open output rw");
+    int fd=::open(dst.c_str(),O_RDWR|O_CREAT|O_TRUNC,0600);
+    if(fd<0)throw std::runtime_error("open mmap output");
+    if(ftruncate(fd,(off_t)total)!=0){::close(fd);throw std::runtime_error("truncate output");}
+    uint8_t* mem=nullptr;
+    if(total){
+        void* q=mmap(nullptr,(size_t)total,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
+        if(q==MAP_FAILED){::close(fd);throw std::runtime_error("mmap output");}
+        mem=(uint8_t*)q;
+    }
     std::vector<uint8_t> seen((size_t)((total+7)/8),0);
     uint64_t assigned=0;
-    for(const auto &x:p){
-        // payload is embedded: copy just this page to temp to reuse streaming BitReader.
-        std::string tp=src+".decode.tmp";
-        {
-            std::ifstream ci(src,std::ios::binary);ci.seekg((std::streamoff)x.off);
-            std::ofstream co(tp,std::ios::binary|std::ios::trunc);
-            std::vector<char>b(1<<20);uint64_t rem=x.bytes;
-            while(rem){size_t n=(size_t)std::min<uint64_t>(rem,b.size());ci.read(b.data(),n);if((size_t)ci.gcount()!=n)throw std::runtime_error("short page");co.write(b.data(),n);rem-=n;}
+    try{
+        for(const auto &x:p){
+            BitReader br(src,x.off,x.bytes);uint64_t last=uint64_t(-1);
+            for(uint64_t j=0;j<x.count;j++){
+                uint64_t gap=br.rice(x.k);
+                uint64_t pos=(last==uint64_t(-1))?gap:(last+1+gap);
+                if(pos>=total)throw std::runtime_error("position range");
+                size_t by=(size_t)(pos>>3);uint8_t mask=uint8_t(1u<<(pos&7));
+                if(seen[by]&mask)throw std::runtime_error("page overlap");
+                seen[by]|=mask;assigned++;
+                mem[pos]=x.sym;last=pos;
+            }
         }
-        BitReader br(tp,x.bytes);uint64_t last=uint64_t(-1);
-        for(uint64_t j=0;j<x.count;j++){
-            uint64_t gap=br.rice(x.k);
-            uint64_t pos=(last==uint64_t(-1))?gap:(last+1+gap);
-            if(pos>=total)throw std::runtime_error("position range");
-            size_t by=(size_t)(pos>>3);uint8_t mask=uint8_t(1u<<(pos&7));
-            if(seen[by]&mask)throw std::runtime_error("page overlap");
-            seen[by]|=mask;assigned++;
-            rw.seekp((std::streamoff)pos);rw.put(char(x.sym));last=pos;
-        }
-        std::remove(tp.c_str());
+        if(assigned!=total)throw std::runtime_error("unassigned slots");
+        if(total && msync(mem,(size_t)total,MS_SYNC)!=0)throw std::runtime_error("msync");
+    }catch(...){
+        if(total)munmap(mem,(size_t)total);::close(fd);throw;
     }
-    if(assigned!=total)throw std::runtime_error("unassigned slots");
-    rw.flush();
+    if(total)munmap(mem,(size_t)total);::close(fd);
     std::cerr<<"HMC_RECOVERED_BYTES="<<total<<"\nHMC_ASSIGNED_SLOTS="<<assigned<<"\n";
 }
 
