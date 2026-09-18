@@ -11,7 +11,7 @@ on:
 
 jobs:
   sweep:
-    name: p\${{ matrix.period }}-g\${{ matrix.guard }}-b\${{ matrix.br }}
+    name: p${{ matrix.period }}-g${{ matrix.guard }}-b${{ matrix.br }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -42,9 +42,9 @@ jobs:
           python3 audio_lab/staggered_multicarrier_v1.py enwik9 \
             --prefix 4096 \
             --sr 48000 \
-            --period-ms "\${{ matrix.period }}" \
-            --guard-ms "\${{ matrix.guard }}" \
-            --bitrate "\${{ matrix.br }}" \
+            --period-ms "${{ matrix.period }}" \
+            --guard-ms "${{ matrix.guard }}" \
+            --bitrate "${{ matrix.br }}" \
             --out-prefix probe > result.json 2>stderr.txt
           rc=$?
           echo "$rc" > exit_code.txt
@@ -55,7 +55,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: stagger-p\${{ matrix.period }}-g\${{ matrix.guard }}-b\${{ matrix.br }}
+          name: stagger-p${{ matrix.period }}-g${{ matrix.guard }}-b${{ matrix.br }}
           path: |
             result.json
             stderr.txt
@@ -153,9 +153,9 @@ jobs:
           python3 audio_lab/staggered_multicarrier_v1.py enwik9 \
             --prefix 1048576 \
             --sr 48000 \
-            --period-ms "\${{ steps.cfg.outputs.period }}" \
-            --guard-ms "\${{ steps.cfg.outputs.guard }}" \
-            --bitrate "\${{ steps.cfg.outputs.br }}" \
+            --period-ms "${{ steps.cfg.outputs.period }}" \
+            --guard-ms "${{ steps.cfg.outputs.guard }}" \
+            --bitrate "${{ steps.cfg.outputs.br }}" \
             --out-prefix promoted > promoted_result.json 2>promoted_stderr.txt
           rc=$?
           echo "$rc" > promoted_exit_code.txt
