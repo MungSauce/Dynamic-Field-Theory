@@ -1,4 +1,5 @@
 name: HMC Domino EIS benchmark
+# rerun after corrected Hermitian QAM mapping
 
 on:
   workflow_dispatch:
