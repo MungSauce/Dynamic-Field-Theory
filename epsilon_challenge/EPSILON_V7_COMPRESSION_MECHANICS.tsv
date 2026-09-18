@@ -1,0 +1,67 @@
+lossless transform	means	mapping with an exact inverse
+lossless transform	must preserve	all information required to recover source exactly
+lossless transform	must not rely on	semantic similarity instead of exact recovery
+lossless compression candidate	requires	exact inverse verification
+lossless compression candidate	requires	complete child size accounting
+lossless compression candidate	requires	source integrity hash comparison
+lossless compression candidate	is rejected when	reconstructed source differs by any byte
+lossless compression candidate	is rejected when	complete child representation is not smaller than parent
+exact reconstruction	means	byte-for-byte recovery of frozen source
+exact reconstruction	may be verified by	source byte count
+exact reconstruction	may be verified by	cryptographic hash
+cryptographic hash	can detect	changed reconstructed bytes
+transform chain	means	ordered composition of reversible transforms
+transform chain	requires	inverse transforms applied in reverse order
+transform chain	remains lossless when	every stage has exact inverse and required metadata
+transform chain	should retain	parameters required by every inverse stage
+compression overhead	includes	dictionaries indexes codec identifiers and recovery metadata
+compression decision	should compare	complete encoded bytes including overhead
+compression decision	should prefer	smallest verified exact candidate
+compression decision	may select	raw representation when transforms do not reduce complete size
+redundancy	means	representational repetition that can be removed with exact reconstruction
+repeated values	may support	dictionary coding
+dictionary coding	stores	unique repeated values once plus identifiers
+dictionary coding	is useful when	many records reuse the same values
+fixed record schema	may support	columnar decomposition
+columnar decomposition	groups	same field across many records
+columnar decomposition	may expose	runs small deltas and low cardinality
+neighboring numeric values with small differences	may support	delta encoding
+delta encoding	stores	initial value plus reversible differences
+long repeated runs	may support	run-length encoding
+run-length encoding	stores	value and run count
+low-cardinality integer field	may support	bit packing
+bit packing	uses	minimum sufficient bit width for bounded integer values
+mostly small nonnegative integers	may support	variable-length integer encoding
+variable-length integer encoding	uses	fewer bytes for small integer magnitudes
+repeated byte or symbol sequences	may support	content-addressed or token factoring
+content-addressed factoring	stores	repeated exact chunk once plus references
+versioned states with small changes	may support	exact delta patching
+exact delta patching	stores	reversible difference from reference state
+historical prefix relation	may support	latest state plus exact cut points or deltas
+block partitioning	means	divide source representation into independently encoded blocks
+block partitioning	may enable	selective decode without full expansion
+block partitioning	may allow	different lossless codec per block
+adaptive codec selection	means	measure multiple exact candidates and retain the smallest
+adaptive codec selection	must verify	selected candidate decodes exactly
+entropy coding	may reduce	statistical redundancy remaining after structural transforms
+entropy coding	should not be assumed to help	already high entropy data
+high entropy data	may make	compression overhead larger than savings
+structured text	may contain	syntactic repetition separate from information content
+structured text	may support	schema extraction and dictionary coding
+source formatting	may be separated from	canonical structured content when exact format residue is retained
+format residue	must allow	exact recovery of original formatting bytes
+canonical representation	does not replace	original source recovery requirement
+lossless plateau	means	no tested reversible candidate further reduces complete representation
+lossless plateau	requires	testing materially applicable transform classes and orderings
+lossless plateau	does not prove	no future method can ever improve compression
+self-state compression	requires	frozen parent state
+self-state compression	requires	disposable candidate branch
+self-state compression	requires	exact parent reconstruction before promotion
+self-state compression	must not overwrite	authoritative parent during experiment
+failed compression candidate	should preserve	negative evidence and failure reason
+compression lesson	should teach	mechanism rather than sealed answer
+sealed evaluation	must withhold	optimal transform chain
+sealed evaluation	must withhold	expected encoded bytes and expected size
+novel transfer	requires	selecting reversible transform on source not used in lessons
+novel transfer	requires	exact reconstruction of unfamiliar source
+compression capability	is stronger evidence when	sealed transfer succeeds after mechanism-only teaching
