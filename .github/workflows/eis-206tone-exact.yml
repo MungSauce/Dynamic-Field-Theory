@@ -1,0 +1,85 @@
+name: EIS 206-tone exact test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-eis-206tone-20260918
+    paths:
+      - 'audio_lab/eis_206tone_onoff_v1.py'
+      - '.github/workflows/eis-206tone-exact.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl unzip xz-utils flac python3-numpy
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          ok=0
+          for attempt in 1 2 3 4 5 6; do
+            rm -f enwik9.zip
+            curl -A "Mozilla/5.0" -L --fail --connect-timeout 30 --max-time 300 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip || true
+            if [ -f enwik9.zip ] && [ "$(stat -c%s enwik9.zip)" -gt 300000000 ] && unzip -tq enwik9.zip >/dev/null 2>&1; then ok=1; break; fi
+            sleep 8
+          done
+          test "$ok" = "1"
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Carrier self-test
+        run: python3 audio_lab/eis_206tone_onoff_v1.py selftest | tee selftest.json
+      - name: Encode 50k canonical positions
+        run: |
+          head -c 50000 enwik9 > src50k
+          python3 audio_lab/eis_206tone_onoff_v1.py encode src50k enwik9 tones.wav alphabet.map --limit 50000
+          python3 audio_lab/eis_206tone_onoff_v1.py decode tones.wav alphabet.map recovered50k
+          cmp src50k recovered50k
+          sha256sum src50k recovered50k
+      - name: Compress carriers and baseline
+        run: |
+          cp tones.wav tones_for_flac.wav
+          flac -f --best --silent tones_for_flac.wav -o tones.flac
+          xz -9e --threads=1 -c tones.wav > tones.wav.xz
+          xz -9e --threads=1 -c src50k > src50k.xz
+      - name: Result
+        run: |
+          python3 - <<'PY' | tee EIS_206TONE_RESULT.json
+          import json,os,math
+          s=json.load(open("selftest.json"))
+          n=50000
+          r={
+            "source_bytes":os.path.getsize("src50k"),
+            "wav_bytes":os.path.getsize("tones.wav"),
+            "flac_bytes":os.path.getsize("tones.flac"),
+            "wav_xz_bytes":os.path.getsize("tones.wav.xz"),
+            "direct_xz_bytes":os.path.getsize("src50k.xz"),
+            "alphabet_map_bytes":os.path.getsize("alphabet.map"),
+            "decoder_source_bytes":os.path.getsize("audio_lab/eis_206tone_onoff_v1.py"),
+            "frame_samples":412,
+            "sample_rate":48000,
+            "sample_bits":16,
+            "carriers":206,
+            "frame_duration_ms":412/48000*1000,
+            "positions_per_second":48000/412,
+            "exact_reconstruction":open("src50k","rb").read()==open("recovered50k","rb").read(),
+            "carrier_selftest":s,
+            "wav_bytes_per_position":os.path.getsize("tones.wav")/n,
+            "complete_wav_bytes":os.path.getsize("tones.wav")+os.path.getsize("alphabet.map")+os.path.getsize("audio_lab/eis_206tone_onoff_v1.py"),
+            "complete_flac_bytes":os.path.getsize("tones.flac")+os.path.getsize("alphabet.map")+os.path.getsize("audio_lab/eis_206tone_onoff_v1.py")
+          }
+          print(json.dumps(r,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eis-206tone-exact
+          path: |
+            EIS_206TONE_RESULT.json
+            selftest.json
