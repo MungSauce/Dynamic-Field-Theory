@@ -1,0 +1,51 @@
+name: EIS 32-instrument exact keyboard
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-eis-206tone-20260918
+    paths:
+      - 'audio_lab/eis_32instrument_keyboard_v1.py'
+      - '.github/workflows/eis-32instrument-keyboard.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg python3-numpy
+      - name: Make deterministic 256 KiB byte stream
+        run: |
+          python3 - <<'PY'
+          import random
+          r=random.Random(320206)
+          with open("source.bin","wb") as f:
+              f.write(bytes(r.randrange(256) for _ in range(262144)))
+          PY
+      - name: Run 32-instrument sweep
+        run: |
+          python3 audio_lab/eis_32instrument_keyboard_v1.py source.bin --prefix 262144 --outdir eis32 | tee EIS_32INSTRUMENT_RESULT.json
+      - name: Summarize
+        run: |
+          python3 - <<'PY'
+          import json
+          d=json.load(open("EIS_32INSTRUMENT_RESULT.json"))
+          print("BEST_PCM",d["best_pcm"])
+          print("BEST_MP3",d["best_mp3"])
+          if d["best_pcm"]:
+              r=d["best_pcm"]["bytes_per_source_byte_wav"]
+              print("PROJECTED_WAV_1GB_BYTES",int(r*1_000_000_000))
+          if d["best_mp3"]:
+              r=d["best_mp3"]["ratio"]
+              print("PROJECTED_MP3_1GB_BYTES",int(r*1_000_000_000))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eis-32instrument-keyboard
+          path: EIS_32INSTRUMENT_RESULT.json
