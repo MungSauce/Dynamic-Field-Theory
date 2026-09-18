@@ -1,0 +1,202 @@
+name: Hutter APC sequenced-graph sweep
+
+on:
+  push:
+    branches:
+      - hutter-target-apc-bot-20260917
+    paths:
+      - 'hutter_lab/**'
+      - '.github/workflows/hutter-apc-seq-sweep.yml'
+  workflow_dispatch:
+
+jobs:
+  apc-sweep:
+    name: seq-${{ matrix.geom }}-apc-${{ matrix.page }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        geom: [128x128, 256x256, 512x256, 512x512]
+        page: [65536, 262144, 1048576, 4194304]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq unzip curl xz-utils g++ time
+
+      - name: Resolve parameters
+        run: |
+          case "${{ matrix.geom }}" in
+            128x128) echo "W=128" >> "$GITHUB_ENV"; echo "H=128" >> "$GITHUB_ENV" ;;
+            256x256) echo "W=256" >> "$GITHUB_ENV"; echo "H=256" >> "$GITHUB_ENV" ;;
+            512x256) echo "W=512" >> "$GITHUB_ENV"; echo "H=256" >> "$GITHUB_ENV" ;;
+            512x512) echo "W=512" >> "$GITHUB_ENV"; echo "H=512" >> "$GITHUB_ENV" ;;
+            *) exit 2 ;;
+          esac
+          echo "APC_PAGE=${{ matrix.page }}" >> "$GITHUB_ENV"
+
+      - name: Build reversible codecs
+        run: |
+          set -euxo pipefail
+          g++ -O3 -std=c++17 epsilon_challenge/tools/lccp_seq_prototype.cpp -o seq
+          g++ -O3 -std=c++17 epsilon_challenge/tools/apc_final_v1.cpp -o apc
+          strip seq apc
+          XZ_BIN="$(command -v xz)"
+          LZMA_LIB="$(ldd "$XZ_BIN" | awk '/liblzma/{print $3; exit}')"
+          {
+            echo "SEQ_DECODER_BYTES=$(stat -c%s seq)"
+            echo "APC_DECODER_BYTES=$(stat -c%s apc)"
+            echo "XZ_BIN_BYTES=$(stat -c%s "$XZ_BIN")"
+            if [ -n "$LZMA_LIB" ] && [ -f "$LZMA_LIB" ]; then
+              echo "LZMA_LIB_BYTES=$(stat -c%s "$LZMA_LIB")"
+            else
+              echo "LZMA_LIB_BYTES=0"
+            fi
+          } | tee decoder_sizes.txt
+
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "e206c3450ac99950df65bf70ef61a12d  enwik9" | md5sum -c -
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+
+      - name: Sequenced-graph transform
+        run: |
+          set -euxo pipefail
+          /usr/bin/time -v -o seq.time ./seq encode enwik9 base.lcs "$W" "$H" 2>seq.log
+          echo "SEQ_CARRIER_BYTES=$(stat -c%s base.lcs)" | tee metrics.txt
+
+      - name: Baseline entropy candidate
+        run: |
+          set -euxo pipefail
+          /usr/bin/time -v -o baseline_xz.time xz -9e --threads=1 -c base.lcs > base.lcs.xz
+          echo "SEQ_XZ_BYTES=$(stat -c%s base.lcs.xz)" | tee -a metrics.txt
+
+      - name: APC puzzle transform before entropy
+        run: |
+          set -euxo pipefail
+          /usr/bin/time -v -o apc.time ./apc e base.lcs base.lcs.apc "$APC_PAGE" 2>apc.log
+          echo "SEQ_APC_BYTES=$(stat -c%s base.lcs.apc)" | tee -a metrics.txt
+          /usr/bin/time -v -o apc_xz.time xz -9e --threads=1 -c base.lcs.apc > base.lcs.apc.xz
+          echo "SEQ_APC_XZ_BYTES=$(stat -c%s base.lcs.apc.xz)" | tee -a metrics.txt
+
+      - name: Cold exact replay baseline
+        run: |
+          set -euxo pipefail
+          mv enwik9 enwik9.hidden
+          xz -dc base.lcs.xz > recovered.lcs
+          ./seq decode recovered.lcs baseline.out
+          test "$(stat -c%s baseline.out)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  baseline.out" | sha256sum -c -
+          cmp enwik9.hidden baseline.out
+          mv enwik9.hidden enwik9
+          rm baseline.out recovered.lcs
+          echo "BASELINE_EXACT=PASS" | tee -a metrics.txt
+
+      - name: Cold exact replay APC hybrid
+        run: |
+          set -euxo pipefail
+          mv enwik9 enwik9.hidden
+          xz -dc base.lcs.apc.xz > recovered.apc
+          ./apc d recovered.apc recovered.lcs
+          ./seq decode recovered.lcs apc.out
+          test "$(stat -c%s apc.out)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  apc.out" | sha256sum -c -
+          cmp enwik9.hidden apc.out
+          mv enwik9.hidden enwik9
+          rm apc.out recovered.lcs recovered.apc
+          echo "APC_HYBRID_EXACT=PASS" | tee -a metrics.txt
+
+      - name: Build accounting result
+        run: |
+          python3 - <<'PY'
+          import json, os
+          def kv(path):
+              d={}
+              for line in open(path):
+                  line=line.strip()
+                  if '=' in line:
+                      k,v=line.split('=',1)
+                      try:d[k]=int(v)
+                      except: d[k]=v
+              return d
+          m=kv('metrics.txt'); d=kv('decoder_sizes.txt')
+          xz_support=d['XZ_BIN_BYTES']+d['LZMA_LIB_BYTES']
+          baseline=m['SEQ_XZ_BYTES']+d['SEQ_DECODER_BYTES']+xz_support
+          apc=m['SEQ_APC_XZ_BYTES']+d['SEQ_DECODER_BYTES']+d['APC_DECODER_BYTES']+xz_support
+          r={
+            'geometry':'${{ matrix.geom }}',
+            'apc_page':int('${{ matrix.page }}'),
+            'source_bytes':1_000_000_000,
+            'exact':True,
+            'seq_carrier_bytes':m['SEQ_CARRIER_BYTES'],
+            'baseline_carrier_bytes':m['SEQ_XZ_BYTES'],
+            'apc_carrier_pre_entropy_bytes':m['SEQ_APC_BYTES'],
+            'apc_carrier_post_entropy_bytes':m['SEQ_APC_XZ_BYTES'],
+            'decoder_bundle_estimate':d,
+            'baseline_complete_estimate':baseline,
+            'apc_complete_estimate':apc,
+            'apc_delta_vs_baseline':apc-baseline,
+            'apc_accepted':apc<baseline,
+            'thresholds':{
+              'accepted_record':110_793_128,
+              'accepted_1pct':109_685_197,
+              'frontier_2026_hutter_style':99_312_424
+            },
+            'frontier_beat':apc<99_312_424,
+            'accounting_note':'engineering upper-bound bundle estimate using runner xz executable + liblzma; final Hutter packaging must be independently audited'
+          }
+          fn='hutter_apc_${{ matrix.geom }}_${{ matrix.page }}.json'
+          open(fn,'w').write(json.dumps(r,indent=2))
+          print(json.dumps(r,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hutter-apc-${{ matrix.geom }}-${{ matrix.page }}
+          path: |
+            hutter_apc_${{ matrix.geom }}_${{ matrix.page }}.json
+            metrics.txt
+            decoder_sizes.txt
+            seq.log
+            apc.log
+          if-no-files-found: error
+
+  select:
+    name: Select smallest exact APC hybrid
+    needs: apc-sweep
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hutter-apc-*
+          merge-multiple: true
+      - name: Select
+        run: |
+          python3 - <<'PY' | tee HUTTER_APC_SWEEP_RESULT.json
+          import glob,json
+          rows=[json.load(open(p)) for p in glob.glob('hutter_apc_*.json')]
+          if not rows: raise SystemExit('no APC sweep results')
+          exact=[r for r in rows if r.get('exact')]
+          best=min(exact,key=lambda r:r['apc_complete_estimate'])
+          base=min(exact,key=lambda r:r['baseline_complete_estimate'])
+          print(json.dumps({
+            'tested':len(rows),
+            'best_apc':best,
+            'best_baseline':base,
+            'apc_improves_best_baseline':best['apc_complete_estimate']<base['baseline_complete_estimate'],
+            'frontier_target':99_312_424,
+            'frontier_beat':best['apc_complete_estimate']<99_312_424
+          },indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hutter-apc-sweep-result
+          path: HUTTER_APC_SWEEP_RESULT.json
