@@ -1,0 +1,44 @@
+name: EIS 206-tone MP3 sweep
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-eis-206tone-20260918
+    paths:
+      - 'audio_lab/eis_206tone_mp3_v1.py'
+      - '.github/workflows/eis-206tone-mp3.yml'
+
+jobs:
+  mp3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg python3-numpy
+      - name: Run MP3 sweep
+        run: |
+          python3 audio_lab/eis_206tone_mp3_v1.py --symbols 4096 | tee EIS_206TONE_MP3_RESULT.json
+      - name: Summarize
+        run: |
+          python3 - <<'PY'
+          import json
+          d=json.load(open("EIS_206TONE_MP3_RESULT.json"))
+          print("BEST_EXACT",d["best_exact"])
+          if d["best_exact"]:
+              b=d["best_exact"]
+              N=1_000_000_000
+              print("PROJECTED_MP3_BYTES_FOR_1E9_SYMBOLS", int(b["bytes_per_symbol_mp3"]*N))
+              print("PROJECTED_MB_DECIMAL", b["bytes_per_symbol_mp3"]*N/1e6)
+          print("EXACT_CASES",sum(1 for r in d["results"] if r["exact"]))
+          for r in d["results"]:
+              if r["exact"]:
+                  print("EXACT",r)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eis-206tone-mp3
+          path: EIS_206TONE_MP3_RESULT.json
