@@ -1,0 +1,134 @@
+name: Epsilon V7 APC final-pass hybrid
+
+on:
+  push:
+    branches:
+      - epsilon-v7-max-lossless-20260917
+    paths:
+      - 'epsilon_challenge/tools/apc_final_v1.cpp'
+      - '.github/workflows/epsilon-v7-apc-final-pass.yml'
+  workflow_dispatch:
+
+jobs:
+  apc-final-pass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq unzip curl xz-utils g++ time
+
+      - name: Build APC and incumbent structural codec
+        run: |
+          g++ -O3 -std=c++17 epsilon_challenge/tools/apc_final_v1.cpp -o apc_final
+          g++ -O3 -std=c++17 epsilon_challenge/tools/lccp_recursive_grammar.cpp -o recursive_grammar
+          strip apc_final recursive_grammar
+          echo "APC_DECODER_BYTES=$(stat -c%s apc_final)" | tee build_sizes.txt
+          echo "RGD_DECODER_BYTES=$(stat -c%s recursive_grammar)" | tee -a build_sizes.txt
+
+      - name: APC exactness sanity gate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import random
+          r=random.Random(12345)
+          x=(b'AB'*250000)+(b'the quick brown fox jumps over the lazy dog\n'*12000)+bytes(r.randrange(16) for _ in range(500000))
+          Path('sanity.bin').write_bytes(x)
+          PY
+          ./apc_final e sanity.bin sanity.apc 1000000
+          ./apc_final d sanity.apc sanity.out
+          cmp sanity.bin sanity.out
+          echo "APC_SANITY_EXACT=PASS"
+
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "e206c3450ac99950df65bf70ef61a12d  enwik9" | md5sum -c -
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+
+      - name: Rebuild current verified incumbent family carrier
+        run: |
+          /usr/bin/time -v -o rgd.time ./recursive_grammar encode enwik9 base.rgd 32768 256 32 2>rgd.log
+          xz -9e --threads=1 -c base.rgd > base.rgd.xz
+          echo "RGD_BYTES=$(stat -c%s base.rgd)" | tee metrics.txt
+          echo "BASE_XZ_BYTES=$(stat -c%s base.rgd.xz)" | tee -a metrics.txt
+
+      - name: Verify incumbent cold replay
+        run: |
+          mv enwik9 enwik9.hidden
+          xz -dc base.rgd.xz > base.restored.rgd
+          ./recursive_grammar decode base.restored.rgd baseline.out
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  baseline.out" | sha256sum -c -
+          cmp enwik9.hidden baseline.out
+          mv enwik9.hidden enwik9
+          rm baseline.out base.restored.rgd
+          echo "BASELINE_EXACT=PASS" | tee -a metrics.txt
+
+      - name: APC final pass on 293MB-style entropy carrier
+        run: |
+          ./apc_final e base.rgd.xz base.rgd.xz.apc 1000000 2>apc_xz.log
+          mv enwik9 enwik9.hidden
+          ./apc_final d base.rgd.xz.apc recovered.xz
+          xz -dc recovered.xz > recovered.rgd
+          ./recursive_grammar decode recovered.rgd apc_xz.out
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  apc_xz.out" | sha256sum -c -
+          cmp enwik9.hidden apc_xz.out
+          mv enwik9.hidden enwik9
+          echo "APC_ON_XZ_BYTES=$(stat -c%s base.rgd.xz.apc)" | tee -a metrics.txt
+          echo "APC_ON_XZ_EXACT=PASS" | tee -a metrics.txt
+          rm recovered.xz recovered.rgd apc_xz.out
+
+      - name: APC final pass on pre-entropy grammar carrier
+        run: |
+          ./apc_final e base.rgd base.rgd.apc 1000000 2>apc_rgd.log
+          mv enwik9 enwik9.hidden
+          ./apc_final d base.rgd.apc recovered.rgd
+          ./recursive_grammar decode recovered.rgd apc_rgd.out
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  apc_rgd.out" | sha256sum -c -
+          cmp enwik9.hidden apc_rgd.out
+          mv enwik9.hidden enwik9
+          echo "APC_ON_RGD_BYTES=$(stat -c%s base.rgd.apc)" | tee -a metrics.txt
+          echo "APC_ON_RGD_EXACT=PASS" | tee -a metrics.txt
+          rm recovered.rgd apc_rgd.out
+
+      - name: Epsilon accept reject APC final pass
+        run: |
+          python3 - <<'PY' | tee EPSILON_APC_FINAL_RESULT.json
+          import json, os
+          rgd_dec=os.path.getsize('recursive_grammar')
+          apc_dec=os.path.getsize('apc_final')
+          baseline=os.path.getsize('base.rgd.xz')+rgd_dec
+          apc_xz=os.path.getsize('base.rgd.xz.apc')+rgd_dec+apc_dec
+          apc_rgd=os.path.getsize('base.rgd.apc')+rgd_dec+apc_dec
+          candidates=[
+            {'name':'recursive_grammar_then_xz','complete_bytes':baseline,'exact':True},
+            {'name':'recursive_grammar_then_xz_then_APC','complete_bytes':apc_xz,'exact':True},
+            {'name':'recursive_grammar_then_APC','complete_bytes':apc_rgd,'exact':True},
+          ]
+          best=min(candidates,key=lambda x:x['complete_bytes'])
+          print(json.dumps({
+            'task':'APC supplied to Epsilon as final-pass compressor',
+            'apc_semantics':'page-local raw vs count-puzzle vs pair-puzzle; missing pair edges are NEVER constraints; arithmetic residual is exact solution-rank information',
+            'candidates':candidates,
+            'selected':best,
+            'apc_accepted':best['name']!='recursive_grammar_then_xz',
+            'policy':'accept APC only if exact and smaller under complete decoder+carrier accounting'
+          },indent=2))
+          PY
+          cat metrics.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: epsilon-v7-apc-final-pass-result
+          path: |
+            EPSILON_APC_FINAL_RESULT.json
+            metrics.txt
+            build_sizes.txt
+            apc_xz.log
+            apc_rgd.log
