@@ -1,0 +1,72 @@
+name: EIS-R outer compression probe
+
+on:
+  push:
+    branches:
+      - eis-r-residual-20260918
+    paths:
+      - 'audio_lab/staggered_multicarrier_v1.py'
+      - '.github/workflows/eis-r-outer-compression-probe.yml'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg unzip curl
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Probe 96 kbps
+        run: |
+          set +e
+          python3 audio_lab/staggered_multicarrier_v1.py enwik9             --prefix 4096 --sr 48000 --period-ms 4 --guard-ms 0.5             --bitrate 96 --out-prefix eis96 > eis96.json
+          echo $? > eis96.exit
+          cat eis96.json
+          exit 0
+      - name: Probe 128 kbps
+        run: |
+          set +e
+          python3 audio_lab/staggered_multicarrier_v1.py enwik9             --prefix 4096 --sr 48000 --period-ms 4 --guard-ms 0.5             --bitrate 128 --out-prefix eis128 > eis128.json
+          echo $? > eis128.exit
+          cat eis128.json
+          exit 0
+      - name: Summarize
+        run: |
+          python3 - <<'PY' | tee EIS_R_OUTER_COMPRESSION_SUMMARY.json
+          import json
+          out={}
+          for name in ("eis96","eis128"):
+              try:
+                  d=json.load(open(name+".json"))
+              except Exception as e:
+                  out[name]={"parse_error":repr(e)}
+                  continue
+              out[name]={
+                  "exact":d.get("exact"),
+                  "errors":d.get("errors"),
+                  "nominal_payload_bps":d.get("nominal_payload_bps"),
+                  "mp3_bytes":d.get("mp3_bytes"),
+                  "outer_lossless_compression":d.get("outer_lossless_compression"),
+              }
+          print(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eis-r-outer-compression-probe
+          path: |
+            eis96.json
+            eis96.exit
+            eis128.json
+            eis128.exit
+            EIS_R_OUTER_COMPRESSION_SUMMARY.json
