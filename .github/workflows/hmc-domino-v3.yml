@@ -1,0 +1,74 @@
+name: HMC Domino v3 benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-cascade-20260918
+    paths:
+      - 'hmc/hmc_domino_v3.cpp'
+      - '.github/workflows/hmc-domino-v3.yml'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip time
+      - name: Fetch enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Build
+        run: |
+          g++ -O3 -std=c++17 hmc/hmc_domino_v3.cpp -o hmc_domino_v3
+          strip hmc_domino_v3 || true
+      - name: Benchmark
+        run: |
+          set -euxo pipefail
+          : > v3.tsv
+          printf "source_bytes\tcarrier_bytes\tcomplete_bytes\tbpa\txz_bytes\texact\n" >> v3.tsv
+          for N in 1000000 10000000 100000000; do
+            head -c "$N" enwik9 > "src_$N"
+            /usr/bin/time -f "ENCODE_SECONDS=%e" ./hmc_domino_v3 e "src_$N" "src_$N.hc3" 4 2> "enc_$N.log"
+            /usr/bin/time -f "DECODE_SECONDS=%e" ./hmc_domino_v3 d "src_$N.hc3" "rec_$N" 2> "dec_$N.log"
+            cmp "src_$N" "rec_$N"
+            xz -9e --threads=1 -c "src_$N" > "src_$N.xz"
+            python3 - "$N" <<'PY' >> v3.tsv
+          import os,sys
+          n=int(sys.argv[1]);c=os.path.getsize(f"src_{n}.hc3");d=os.path.getsize("hmc_domino_v3");x=os.path.getsize(f"src_{n}.xz")
+          print(f"{n}\t{c}\t{c+d}\t{8*(c+d)/n:.9f}\t{x}\t1")
+          PY
+          done
+          cat v3.tsv
+      - name: Result
+        run: |
+          python3 - <<'PY' | tee HMC_DOMINO_V3_RESULT.json
+          import csv,json,os
+          rows=[]
+          with open("v3.tsv") as f:
+              for r in csv.DictReader(f,delimiter="\t"):
+                  rows.append({
+                    "source_bytes":int(r["source_bytes"]),
+                    "carrier_bytes":int(r["carrier_bytes"]),
+                    "complete_bytes":int(r["complete_bytes"]),
+                    "bpa":float(r["bpa"]),
+                    "xz_bytes":int(r["xz_bytes"]),
+                    "exact":r["exact"]=="1"
+                  })
+          print(json.dumps({"codec":"HMC Domino v3","decoder_bytes":os.path.getsize("hmc_domino_v3"),"rows":rows},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-domino-v3
+          path: |
+            HMC_DOMINO_V3_RESULT.json
+            v3.tsv
+            enc_*.log
+            dec_*.log
