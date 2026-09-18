@@ -1,0 +1,121 @@
+name: One-character one-sound MP3 exactness sweep
+
+on:
+  push:
+    branches:
+      - hutter-target-apc-bot-20260917
+    paths:
+      - 'audio_lab/**'
+      - '.github/workflows/audio-mp3-symbol-sweep.yml'
+  workflow_dispatch:
+
+jobs:
+  amplitude:
+    name: amp-sps-${{ matrix.sps }}-br-${{ matrix.br }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        sps: [4, 8, 16, 32]
+        br: [8, 16, 32, 64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg unzip curl
+      - name: Fetch canonical enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Run amplitude-symbol probe
+        run: |
+          set +e
+          python3 audio_lab/tone_mp3_probe.py amp enwik9 --prefix 65536 --sr 24000 --sps "${{ matrix.sps }}" --bitrate "${{ matrix.br }}" --out-prefix probe > result.txt 2>&1
+          rc=$?
+          echo "EXIT_CODE=$rc" >> result.txt
+          cat result.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: amp-sps-${{ matrix.sps }}-br-${{ matrix.br }}
+          path: result.txt
+
+  frequency:
+    name: freq-sps-${{ matrix.sps }}-br-${{ matrix.br }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        sps: [24, 48, 96, 192]
+        br: [16, 32, 64, 128]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg unzip curl
+      - name: Fetch canonical enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+      - name: Run frequency-symbol probe
+        run: |
+          set +e
+          python3 audio_lab/tone_mp3_probe.py freq enwik9 --prefix 4096 --sr 24000 --sps "${{ matrix.sps }}" --bitrate "${{ matrix.br }}" --out-prefix probe > result.txt 2>&1
+          rc=$?
+          echo "EXIT_CODE=$rc" >> result.txt
+          cat result.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: freq-sps-${{ matrix.sps }}-br-${{ matrix.br }}
+          path: result.txt
+
+  summarize:
+    needs: [amplitude, frequency]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-sps-*-br-*'
+          path: results
+      - name: Summarize exact configurations
+        run: |
+          python3 - <<'PY' | tee AUDIO_MP3_SWEEP_SUMMARY.txt
+          from pathlib import Path
+          rows=[]
+          for p in Path('results').rglob('result.txt'):
+              d={}
+              for line in p.read_text(errors='ignore').splitlines():
+                  if '=' in line:
+                      k,v=line.split('=',1); d[k]=v
+              if d: rows.append((p.parent.name,d))
+          exact=[(n,d) for n,d in rows if d.get('EXACT')=='PASS']
+          exact.sort(key=lambda x:int(x[1].get('FULL_GB_MP3_EST_BYTES_AT_SAME_TIMING','999999999999999')))
+          print(f'TESTED={len(rows)}')
+          print(f'EXACT_CONFIGS={len(exact)}')
+          for n,d in exact:
+              print(n,
+                    'MP3_BYTES='+d.get('MP3_BYTES','?'),
+                    'FULL_EST='+d.get('FULL_GB_MP3_EST_BYTES_AT_SAME_TIMING','?'),
+                    'FULL_EST_MB='+d.get('FULL_GB_MP3_EST_MB','?'))
+          if exact:
+              print('BEST_EXACT='+exact[0][0])
+              print('BEST_FULL_EST_BYTES='+exact[0][1]['FULL_GB_MP3_EST_BYTES_AT_SAME_TIMING'])
+          else:
+              print('BEST_EXACT=NONE')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audio-mp3-sweep-summary
+          path: AUDIO_MP3_SWEEP_SUMMARY.txt
