@@ -1,0 +1,59 @@
+name: DFT ERPB v1 canonical plateau search
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dft-erpb-20260918
+    paths:
+      - 'erpb/**'
+      - '.github/workflows/dft-erpb-v1.yml'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xz-utils g++ curl unzip
+
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+
+      - name: Run ERPB
+        run: |
+          python3 erpb/run_erpb_v1.py enwik9 2>&1 | tee ERPB_V1_RUN.log
+
+      - name: Summarize
+        if: always()
+        run: |
+          if [ -f ERPB_V1_RESULT.json ]; then
+            python3 - <<'PY'
+          import json
+          d=json.load(open("ERPB_V1_RESULT.json"))
+          print(json.dumps({
+            "overall_incumbent": d.get("overall_incumbent"),
+            "channel_incumbents": d.get("channel_incumbents"),
+            "plateau_status": d.get("plateau_status"),
+            "elapsed_s": d.get("elapsed_s")
+          }, indent=2))
+          PY
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dft-erpb-v1-result
+          path: |
+            ERPB_V1_RESULT.json
+            ERPB_V1_RUN.log
+          if-no-files-found: warn
