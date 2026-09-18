@@ -91,8 +91,9 @@ def run(source,outdir,prefix):
     os.makedirs(outdir,exist_ok=True)
     data=Path(source).read_bytes()[:prefix]
     rows=[]
+    # Stage 1: find the densest exact PCM points first.
     for sample_bits in (16,24):
-      for block in (66,72,80,96,112,128,160,192,256):
+      for block in (66,72,80,96,112,128,160,192):
         for drive in (0.8,1.0,1.2,1.4):
           q,pad,peak,bins,A=encode_bytes(data,block,sample_bits,drive)
           tag=f"b{block}_s{sample_bits}_d{drive}"
@@ -102,7 +103,7 @@ def run(source,outdir,prefix):
           rec=decode_pcm(rq,len(data),block,sample_bits,drive)
           exact=rec==data
           row={
-            "block_samples":block,"sample_bits":sample_bits,"drive":drive,
+            "tag":tag,"block_samples":block,"sample_bits":sample_bits,"drive":drive,
             "carriers":CARRIERS,"listeners":CARRIERS,"bytes_per_event":BYTES_PER_EVENT,
             "payload_bytes":len(data),"events":math.ceil(len(data)/BYTES_PER_EVENT),
             "pcm_exact":exact,"pcm_errors":sum(a!=b for a,b in zip(rec,data)),
@@ -112,39 +113,41 @@ def run(source,outdir,prefix):
             "tone_span_hz":float((bins[-1]-bins[0])*SR/block),
             "bytes_per_source_byte_wav":os.path.getsize(wav)/len(data)
           }
-          if exact and not row["clipped"]:
-            for br in (320,256,192,160,128,112,96,80,64,56,48,40,32):
-              mp3=os.path.join(outdir,tag+f"_{br}.mp3")
-              dw=os.path.join(outdir,tag+f"_{br}_dec.wav")
-              subprocess.run(["ffmpeg","-loglevel","error","-y","-i",wav,"-codec:a","libmp3lame","-b:a",f"{br}k",mp3],check=True)
-              subprocess.run(["ffmpeg","-loglevel","error","-y","-i",mp3,"-ac","1","-ar",str(SR),"-c:a","pcm_s16le",dw],check=True)
-              dq,dbits=read_wav(dw)
-              # MP3 decode is 16-bit PCM; decode using 16-bit scale regardless of source WAV depth.
-              drec=decode_pcm(dq,len(data),block,16,drive)
-              errors=sum(a!=b for a,b in zip(drec,data))
-              row[f"mp3_{br}_bytes"]=os.path.getsize(mp3)
-              row[f"mp3_{br}_errors"]=errors
-              row[f"mp3_{br}_exact"]=errors==0
-              row[f"mp3_{br}_ratio"]=os.path.getsize(mp3)/len(data)
           rows.append(row)
     pcm=[r for r in rows if r["pcm_exact"] and not r["clipped"]]
-    mp=[]
-    for r in pcm:
-      for br in (320,256,192,160,128,112,96,80,64,56,48,40,32):
-        if r.get(f"mp3_{br}_exact"):
-          mp.append((r[f"mp3_{br}_ratio"],br,r))
     best_pcm=min(pcm,key=lambda r:r["bytes_per_source_byte_wav"]) if pcm else None
+
+    # Stage 2: MP3 only on the six smallest exact PCM candidates.
+    candidates=sorted(pcm,key=lambda r:r["bytes_per_source_byte_wav"])[:6]
+    mp=[]
+    for r in candidates:
+      wav=os.path.join(outdir,r["tag"]+".wav")
+      for br in (320,256,192,160,128,112,96,80,64,56,48,40,32):
+        mp3=os.path.join(outdir,r["tag"]+f"_{br}.mp3")
+        dw=os.path.join(outdir,r["tag"]+f"_{br}_dec.wav")
+        subprocess.run(["ffmpeg","-loglevel","error","-y","-i",wav,"-codec:a","libmp3lame","-b:a",f"{br}k",mp3],check=True)
+        subprocess.run(["ffmpeg","-loglevel","error","-y","-i",mp3,"-ac","1","-ar",str(SR),"-c:a","pcm_s16le",dw],check=True)
+        dq,dbits=read_wav(dw)
+        drec=decode_pcm(dq,len(data),r["block_samples"],16,r["drive"])
+        errors=sum(a!=b for a,b in zip(drec,data))
+        trial={"bitrate_kbps":br,"mp3_bytes":os.path.getsize(mp3),"errors":errors,
+               "exact":errors==0,"ratio":os.path.getsize(mp3)/len(data)}
+        r.setdefault("mp3_trials",[]).append(trial)
+        if trial["exact"]:
+          mp.append((trial["ratio"],br,r,trial))
     best_mp3=None
     if mp:
-      ratio,br,r=min(mp,key=lambda x:x[0])
-      best_mp3={"ratio":ratio,"bitrate_kbps":br,"block_samples":r["block_samples"],"source_sample_bits":r["sample_bits"],"drive":r["drive"],"mp3_bytes":r[f"mp3_{br}_bytes"]}
+      ratio,br,r,t=min(mp,key=lambda x:x[0])
+      best_mp3={"ratio":ratio,"bitrate_kbps":br,"block_samples":r["block_samples"],
+                "source_sample_bits":r["sample_bits"],"drive":r["drive"],"mp3_bytes":t["mp3_bytes"]}
     return {
       "codec":"EIS 32-instrument / 32-listener byte keyboard v1",
       "mapping":"each fixed carrier/listener emits one 8-bit letter state (4-bit I + 4-bit Q); 32 letters per event",
       "source_bytes":len(data),"source_sha256":sha(data),
-      "best_pcm":best_pcm,"best_mp3":best_mp3,"rows":rows
+      "best_pcm":best_pcm,"best_mp3":best_mp3,
+      "mp3_candidates_tested":[r["tag"] for r in candidates],
+      "rows":rows
     }
-
 if __name__=="__main__":
     ap=argparse.ArgumentParser();ap.add_argument("source");ap.add_argument("--prefix",type=int,default=262144);ap.add_argument("--outdir",default="eis32")
     a=ap.parse_args();print(json.dumps(run(a.source,a.outdir,a.prefix),indent=2))
