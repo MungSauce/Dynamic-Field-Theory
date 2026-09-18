@@ -1,0 +1,149 @@
+name: Hutter fixed-state ingest bot screen
+
+on:
+  push:
+    branches:
+      - hutter-target-apc-bot-20260917
+    paths:
+      - 'hutter_lab/fixed_state_bot_v1.cpp'
+      - '.github/workflows/hutter-fixed-state-bot.yml'
+  workflow_dispatch:
+
+jobs:
+  screen:
+    name: bot-t${{ matrix.tb }}-w${{ matrix.wb }}-m${{ matrix.mw }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        tb: [18, 20, 22]
+        wb: [22, 24]
+        mw: [48, 128]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq unzip curl g++ xz-utils time
+
+      - name: Build fixed-state bot
+        run: |
+          g++ -O3 -std=c++17 hutter_lab/fixed_state_bot_v1.cpp -o fixed_state_bot
+          strip fixed_state_bot
+          echo "BOT_DECODER_BYTES=$(stat -c%s fixed_state_bot)" | tee bot_build.txt
+
+      - name: Fetch canonical corpus and freeze 10MB prefix
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+          head -c 10000000 enwik9 > prefix10m
+          sha256sum prefix10m | tee prefix.sha256
+
+      - name: Encode fixed-state bot
+        run: |
+          set -euxo pipefail
+          /usr/bin/time -v -o bot_encode.time ./fixed_state_bot e prefix10m bot.fsb "${{ matrix.tb }}" "${{ matrix.wb }}" "${{ matrix.mw }}" 2>bot_encode.log
+          echo "BOT_CARRIER_BYTES=$(stat -c%s bot.fsb)" | tee bot_metrics.txt
+
+      - name: Exact cold replay
+        run: |
+          set -euxo pipefail
+          mv prefix10m prefix10m.hidden
+          /usr/bin/time -v -o bot_decode.time ./fixed_state_bot d bot.fsb recovered
+          cmp prefix10m.hidden recovered
+          test "$(stat -c%s recovered)" = "10000000"
+          echo "BOT_EXACT=PASS" | tee -a bot_metrics.txt
+          mv prefix10m.hidden prefix10m
+          rm recovered
+
+      - name: Baseline XZ on same prefix
+        run: |
+          set -euxo pipefail
+          xz -9e --threads=1 -c prefix10m > prefix10m.xz
+          echo "XZ_PREFIX_BYTES=$(stat -c%s prefix10m.xz)" | tee -a bot_metrics.txt
+
+      - name: Score screen
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          d={}
+          for fn in ('bot_build.txt','bot_metrics.txt'):
+              for line in open(fn):
+                  if '=' in line:
+                      k,v=line.strip().split('=',1)
+                      try:d[k]=int(v)
+                      except:d[k]=v
+          carrier=d['BOT_CARRIER_BYTES']
+          dec=d['BOT_DECODER_BYTES']
+          n=10_000_000
+          bpb=8*carrier/n
+          complete_bpb=8*(carrier+dec)/n
+          projected=int((carrier/n)*1_000_000_000+dec)
+          target_bpb=8*99_312_424/1_000_000_000
+          result={
+            'table_bits':int('${{ matrix.tb }}'),
+            'window_bits':int('${{ matrix.wb }}'),
+            'match_weight':int('${{ matrix.mw }}'),
+            'prefix_bytes':n,
+            'carrier_bytes':carrier,
+            'decoder_bytes':dec,
+            'carrier_bpb':bpb,
+            'complete_prefix_bpb':complete_bpb,
+            'naive_linear_projection_complete_bytes':projected,
+            'frontier_target_complete_bytes':99_312_424,
+            'frontier_target_bpb':target_bpb,
+            'screen_promising':bpb < 0.90,
+            'full_run_gate':bpb < 0.90,
+            'exact':True,
+            'fixed_state_note':'adaptive runtime state has fixed allocated capacity and is reconstructed causally by decoder; only bitstream+decoder persist'
+          }
+          fn='fixed_state_bot_${{ matrix.tb }}_${{ matrix.wb }}_${{ matrix.mw }}.json'
+          open(fn,'w').write(json.dumps(result,indent=2))
+          print(json.dumps(result,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixed-state-bot-${{ matrix.tb }}-${{ matrix.wb }}-${{ matrix.mw }}
+          path: |
+            fixed_state_bot_${{ matrix.tb }}_${{ matrix.wb }}_${{ matrix.mw }}.json
+            bot_encode.log
+            bot_encode.time
+            bot_decode.time
+            bot_metrics.txt
+          if-no-files-found: error
+
+  select:
+    name: Select fixed-state bot screen
+    needs: screen
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fixed-state-bot-*
+          merge-multiple: true
+      - name: Select smallest bpb
+        run: |
+          python3 - <<'PY' | tee FIXED_STATE_BOT_SCREEN_RESULT.json
+          import glob,json
+          rows=[json.load(open(p)) for p in glob.glob('fixed_state_bot_*.json')]
+          if not rows: raise SystemExit('no bot results')
+          best=min(rows,key=lambda r:r['carrier_bpb'])
+          print(json.dumps({
+            'tested':len(rows),
+            'best':best,
+            'frontier_bpb':8*99_312_424/1_000_000_000,
+            'full_run_recommended':best['carrier_bpb']<0.90,
+            'note':'prefix projection is screening evidence only; no full-corpus claim'
+          },indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixed-state-bot-screen-result
+          path: FIXED_STATE_BOT_SCREEN_RESULT.json
