@@ -61,7 +61,7 @@ def encode(data: bytes, wav_path: str, sr: int, block: int, carriers: int,
             X=np.zeros(block,dtype=np.complex128)
             vals=A*(iq[:,0]+1j*iq[:,1])
             X[bins]=vals
-            X[-bins]=np.conj(vals[::-1])
+            X[-bins]=np.conj(vals)
             x=np.fft.ifft(X).real
             peak=max(peak,float(np.max(np.abs(x))))
             q=np.rint(np.clip(x,-1.0,1.0)*lim).astype(np.int32)
