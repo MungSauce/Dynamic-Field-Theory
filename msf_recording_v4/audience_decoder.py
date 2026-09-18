@@ -20,12 +20,18 @@ def listen(msf,output):
     # The audience knows only the generic signal basis. Each conceptual listener
     # reads its procedural basis coefficient from the one scalar recording sample.
     slots=[instrument_slot(i,N) for i in range(N)]
-    divisors=[pow(B,s) for s in slots]
+    instrument_for_slot=[0]*N
+    for i,s in enumerate(slots): instrument_for_slot[s]=i
     off=0
     for t in range(frames):
         sample=int.from_bytes(payload[off:off+sb],"little");off+=sb
-        for i in range(N):
-            y=(sample//divisors[i])%B
+        slot_digits=[0]*N
+        for s in range(N):
+            sample,y=divmod(sample,B)
+            slot_digits[s]=y
+        if sample: raise ValueError("noncanonical scalar sample")
+        for slot,y in enumerate(slot_digits):
+            i=instrument_for_slot[slot]
             pair=remove_modifier(y,i,B);fv=pair%A;rv=pair//A
             s,e=page_bounds(n,N,i);L=e-s
             if t<(L+1)//2:out[s+t]=alphabet[fv]
