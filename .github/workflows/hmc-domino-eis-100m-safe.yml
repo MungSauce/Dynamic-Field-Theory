@@ -1,0 +1,82 @@
+name: HMC Domino EIS 100MB safe boundary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-domino-eis-20260918
+    paths:
+      - '.github/workflows/hmc-domino-eis-100m-safe.yml'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ xz-utils curl unzip flac time
+          python3 -m pip install --quiet numpy
+      - name: Fetch corpus
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          head -c 100000000 enwik9 > src100
+      - name: Build and create HMC path once
+        run: |
+          set -euxo pipefail
+          g++ -O3 -std=c++17 hmc/hmc_domino_v4.cpp -o hmc_domino_v4
+          strip hmc_domino_v4 || true
+          ./hmc_domino_v4 e src100 src100.hcd 4 2> hmc100.enc.log
+          ./hmc_domino_v4 d src100.hcd src100.hmc.rec 2> hmc100.dec.log
+          cmp src100 src100.hmc.rec
+          stat -c "HMC100_BYTES=%s" src100.hcd
+      - name: Test safer EIS settings
+        run: |
+          set -uxo pipefail
+          : > safe.tsv
+          printf "sample_bits\tbits_axis\tdrive\trc\n" >> safe.tsv
+          for SPEC in "24 19 1.4" "24 18 1.4" "16 12 1.4" "24 19 1.3" "24 18 1.3"; do
+            set -- $SPEC
+            SB=$1; BA=$2; DR=$3
+            OUT="safe_${SB}_a${BA}_d${DR}"
+            set +e
+            python3 hmc/hmc_eis_bridge.py src100 src100.hcd ./hmc_domino_v4 \
+              --sr 48000 --block 64 --carriers 31 --bits-axis "$BA" --sample-bits "$SB" --drive "$DR" \
+              --out-prefix "$OUT" > "$OUT.json"
+            RC=$?
+            set -e
+            printf "%s\t%s\t%s\t%s\n" "$SB" "$BA" "$DR" "$RC" >> safe.tsv
+          done
+          cat safe.tsv
+      - name: Select exact 100MB EIS
+        run: |
+          python3 - <<'PY' | tee HMC_DOMINO_EIS_100MB_SAFE_RESULT.json
+          import glob,json,os
+          rows=[]
+          for p in glob.glob("safe_*.json"):
+              d=json.load(open(p))
+              if not (d.get("end_to_end_exact") and d.get("eis_carrier_exact")): continue
+              choices={"wav":d["complete_eis_wav_bytes"],"flac":d["complete_eis_flac_bytes"],"wav_xz":d["complete_eis_wav_xz_bytes"]}
+              kind=min(choices,key=choices.get)
+              rows.append({
+                "file":p,"sample_bits":d["sample_bits"],"bits_axis":d["bits_axis"],"drive":d["fft_drive"],
+                "kind":kind,"complete_eis_bytes":choices[kind],"hmc_carrier_bytes":d["hmc_carrier_bytes"],
+                "complete_hmc_bytes":d["complete_hmc_bytes"],"source_bytes":d["source_bytes"],
+                "compression_fraction":1-choices[kind]/d["source_bytes"],"exact":True
+              })
+          rows.sort(key=lambda x:x["complete_eis_bytes"])
+          if not rows: raise SystemExit("no exact 100MB EIS configuration")
+          print(json.dumps({"winner":rows[0],"all_exact":rows},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hmc-domino-eis-100m-safe
+          path: |
+            HMC_DOMINO_EIS_100MB_SAFE_RESULT.json
+            safe.tsv
+            *.log
+          if-no-files-found: warn
