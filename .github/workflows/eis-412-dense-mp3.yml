@@ -1,0 +1,54 @@
+name: EIS 412 dense MP3 stress
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hmc-eis-206tone-20260918
+    paths:
+      - '.github/workflows/eis-412-dense-mp3.yml'
+
+jobs:
+  dense:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg python3-numpy
+      - name: Dense 412-tone sweep
+        run: |
+          python3 - <<'PY' | tee EIS_412_DENSE_MP3.json
+          import os,json,subprocess,tempfile,numpy as np
+          from audio_lab.eis_parallel_keyboard_mp3_v2 import write_pcm,read_pcm,decode,align_decoded,mk_states,SR
+          k=412;nslots=512;density=0.595
+          rows=[]
+          for cell in (640,824,1024,1536,2048):
+            states=mk_states(k,nslots,density,8817+cell)
+            active=int(states.sum())
+            with tempfile.TemporaryDirectory() as td:
+                wav=os.path.join(td,"x.wav")
+                fs=write_pcm(wav,states,k,cell)
+                raw=read_pcm(wav)
+                r0=decode(raw,k,cell,nslots)
+                pcmerr=int(np.count_nonzero(r0!=states))
+                for br in (320,256,192,160,128,96,64):
+                    mp3=os.path.join(td,f"x_{br}.mp3"); dec=os.path.join(td,f"d_{br}.wav")
+                    subprocess.run(["ffmpeg","-loglevel","error","-y","-i",wav,"-codec:a","libmp3lame","-b:a",f"{br}k",mp3],check=True)
+                    subprocess.run(["ffmpeg","-loglevel","error","-y","-i",mp3,"-ac","1","-ar",str(SR),"-c:a","pcm_s16le",dec],check=True)
+                    x=read_pcm(dec);off=align_decoded(x,states,k,cell);rr=decode(x[off:],k,cell,nslots)
+                    err=int(np.count_nonzero(rr!=states));sloterr=int(np.count_nonzero(np.any(rr!=states,axis=1)))
+                    rows.append({"cell":cell,"bitrate_kbps":br,"density":density,"active_controls":active,
+                      "pcm_errors":pcmerr,"control_errors":err,"slot_errors":sloterr,"exact":err==0,
+                      "mp3_bytes":os.path.getsize(mp3),"duration_sec":nslots*cell/SR,
+                      "tone_spacing_hz":float(fs[1]-fs[0])})
+          ex=[r for r in rows if r["exact"]]
+          print(json.dumps({"best_exact":min(ex,key=lambda r:r["mp3_bytes"]) if ex else None,
+                            "exact_cases":len(ex),"rows":rows},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eis-412-dense-mp3
+          path: EIS_412_DENSE_MP3.json
