@@ -1,0 +1,123 @@
+name: Materialize RATA canonical 1pct stream fixture
+
+on:
+  push:
+    branches:
+      - hutter-target-apc-bot-20260917
+    paths:
+      - '.github/workflows/hutter-rata-stream-fixture.yml'
+  workflow_dispatch:
+
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout pinned RATA-CMIX
+        uses: actions/checkout@v4
+        with:
+          repository: Dharmesh2015/RATA-CMIX
+          ref: 0f336dc7fa5d0ac656c671be211879c8ad3eb4dd
+          path: rata
+          fetch-depth: 1
+
+      - name: Install RATA build dependencies
+        run: |
+          cd rata
+          sudo ./install.sh
+
+      - name: Add output-neutral raw entropy-stream dump hook
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('rata/src/runner.cpp')
+          s=p.read_text()
+          needle='''  if (!extraction.save_article_boundaries.empty()) {
+              SaveArticleBoundaries(temp_path, temp_bytes, dictionary, vocab,
+                  extraction.save_article_boundaries);
+            }
+            if (extraction.bytes_only) {'''
+          repl='''  if (!extraction.save_article_boundaries.empty()) {
+              SaveArticleBoundaries(temp_path, temp_bytes, dictionary, vocab,
+                  extraction.save_article_boundaries);
+            }
+            // Research harness only: copy the exact bytes immediately before
+            // entropy coding. This does not modify the coded stream or model.
+            if (const char* raw_dump = std::getenv("FX2_SAVE_RAW_ENTROPY_STREAM")) {
+              std::ifstream src_dump(temp_path, std::ios::binary);
+              std::ofstream dst_dump(raw_dump, std::ios::binary | std::ios::trunc);
+              dst_dump << src_dump.rdbuf();
+              dst_dump.flush();
+              if (!src_dump.eof() || !dst_dump.good()) {
+                Fail("failed dumping raw entropy stream to %s", raw_dump);
+              }
+            }
+            if (extraction.bytes_only) {'''
+          if needle not in s:
+              raise SystemExit('runner patch anchor not found')
+          p.write_text(s.replace(needle,repl,1))
+          PY
+
+      - name: Build connected S1
+        run: |
+          cd rata
+          ./build_and_construct_comp.sh
+          test -x cmix
+
+      - name: Fetch and verify canonical enwik9
+        run: |
+          cd rata
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          echo "e206c3450ac99950df65bf70ef61a12d  enwik9" | md5sum -c -
+          echo "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc  enwik9" | sha256sum -c -
+
+      - name: Materialize exact post-WRT entropy stream without predictor
+        run: |
+          cd rata
+          set -euxo pipefail
+          FX2_SAVE_RAW_ENTROPY_STREAM=/tmp/rata_entropy_stream.bin \
+            ./cmix --bytes-only --save-ppmd-bytes /tmp/vocab_indices.bin -e enwik9 /tmp/no_archive
+          test "$(stat -c%s /tmp/rata_entropy_stream.bin)" = "586459321"
+          head -c 5871388 /tmp/rata_entropy_stream.bin > /tmp/rata_1pct.bin
+          python3 - <<'PY' | tee /tmp/RATA_STREAM_FIXTURE.json
+          import hashlib,json,os
+          def sha(p):
+              h=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(8<<20),b''): h.update(b)
+              return h.hexdigest()
+          def vocab(p):
+              seen=set()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(8<<20),b''): seen.update(b)
+              return len(seen), ''.join(f'{x:02x}' for x in sorted(seen))
+          full='/tmp/rata_entropy_stream.bin'; pref='/tmp/rata_1pct.bin'
+          vf,hf=vocab(full); vp,hp=vocab(pref)
+          r={
+            'upstream':'Dharmesh2015/RATA-CMIX@0f336dc7fa5d0ac656c671be211879c8ad3eb4dd',
+            'canonical_enwik9_sha256':'159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc',
+            'full_stream_bytes':os.path.getsize(full),
+            'full_stream_sha256':sha(full),
+            'full_vocab':vf,
+            'full_vocab_hex':hf,
+            'prefix_bytes':os.path.getsize(pref),
+            'prefix_sha256':sha(pref),
+            'prefix_vocab':vp,
+            'prefix_vocab_hex':hp,
+            'hook':'output-neutral copy immediately before RunCompression entropy coder'
+          }
+          print(json.dumps(r,indent=2))
+          PY
+
+      - name: Upload compact fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: rata-canonical-1pct-stream
+          path: |
+            /tmp/rata_1pct.bin
+            /tmp/RATA_STREAM_FIXTURE.json
+          compression-level: 9
