@@ -1,0 +1,54 @@
+name: TruCompute EIS Visual Physics v23
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - trucompute-eis-visual-physics-v23-20260919
+    paths:
+      - "trucompute/truqcompute_eis_visual_physics_v23.py"
+      - "trucompute/TRUCOMPUTE_EIS_VISUAL_PHYSICS_V23.md"
+      - ".github/workflows/truqcompute-eis-visual-physics-v23.yml"
+
+jobs:
+  exact-prefix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch canonical enwik9 prefix
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          python - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("enwik9.zip") as z:
+              with z.open("enwik9") as src, open("enwik9_64k","wb") as dst:
+                  dst.write(src.read(65536))
+          PY
+
+      - name: Probe physics codec
+        run: |
+          python trucompute/truqcompute_eis_visual_physics_v23.py probe enwik9_64k --prefix 65536 | tee EIS_VISUAL_V23_64K.json
+
+      - name: Cold stream replay
+        run: |
+          python trucompute/truqcompute_eis_visual_physics_v23.py encode enwik9_64k enwik9_64k.tcevp23 --backend lzma | tee EIS_VISUAL_V23_ENCODE.json
+          mv enwik9_64k enwik9_64k.original
+          python trucompute/truqcompute_eis_visual_physics_v23.py decode enwik9_64k.tcevp23 recovered.stream --mode stream | tee EIS_VISUAL_V23_STREAM.json
+          python trucompute/truqcompute_eis_visual_physics_v23.py decode enwik9_64k.tcevp23 recovered.buffer --mode buffer | tee EIS_VISUAL_V23_BUFFER.json
+          cmp enwik9_64k.original recovered.stream
+          cmp enwik9_64k.original recovered.buffer
+          sha256sum enwik9_64k.original recovered.stream recovered.buffer
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trucompute-eis-visual-physics-v23
+          path: |
+            EIS_VISUAL_V23_64K.json
+            EIS_VISUAL_V23_ENCODE.json
+            EIS_VISUAL_V23_STREAM.json
+            EIS_VISUAL_V23_BUFFER.json
+            enwik9_64k.tcevp23
