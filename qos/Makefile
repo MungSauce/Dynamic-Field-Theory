@@ -15,13 +15,13 @@ $(BUILD):
 
 qasm: | $(BUILD)
 	$(PY) tools/qasmc.py examples/boot.qasm kernel/boot_program.h --c-header
+	$(PY) tools/qasmc.py examples/boot.qasm $(BUILD)/boot.qbin
 
 test: | $(BUILD)
 	$(CC) $(CFLAGS_HOST) kernel/qkernel.c kernel/qbin.c tests/test_qkernel.c -o $(BUILD)/test_qkernel
 	$(BUILD)/test_qkernel
 	$(CC) $(CFLAGS_HOST) kernel/qkernel.c kernel/qbin.c tests/test_qbin.c -o $(BUILD)/test_qbin
 	$(BUILD)/test_qbin
-	$(PY) tools/qasmc.py examples/boot.qasm $(BUILD)/boot.qbin
 
 kernel: qasm | $(BUILD)
 	$(CC) $(ASFLAGS) -c kernel/boot.S -o $(BUILD)/boot.o
