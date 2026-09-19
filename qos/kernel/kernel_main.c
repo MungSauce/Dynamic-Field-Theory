@@ -8,6 +8,8 @@ void serial_init(void); void serial_putc(char); void serial_puts(const char*); v
 typedef struct { uint32_t type; uint32_t size; } mb2_tag_t;
 typedef struct { uint32_t type; uint32_t size; uint32_t mod_start; uint32_t mod_end; char cmdline[1]; } mb2_module_tag_t;
 
+static qkernel_t kernel;
+
 static const uint8_t *find_qbin_module(uint32_t mbi_addr, size_t *length){
     const uint8_t *base=(const uint8_t*)(uintptr_t)mbi_addr;
     uint32_t total=*(const uint32_t*)base;
@@ -50,6 +52,7 @@ void kernel_main(uint32_t multiboot_magic,uint32_t multiboot_info){
     serial_puts("EXPECTATIONS=");serial_u32(result.expectations);serial_putc('\n');
     serial_puts("TRANSITIONS=");serial_u32(kernel.transitions);serial_putc('\n');
     serial_puts("EVENTS_PROCESSED=");serial_u32(kernel.events_processed);serial_putc('\n');
+    serial_puts("WAVEFRONTS_PROCESSED=");serial_u32(kernel.wavefronts_processed);serial_putc('\n');
     serial_puts("SPARSE_EXECUTION=PASS\n");
     serial_puts("NULL_TOPOLOGY=PASS\n");
     serial_puts("QOS_BOOT_CONFORMANCE=PASS\n");
