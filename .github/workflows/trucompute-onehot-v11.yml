@@ -1,0 +1,128 @@
+name: TruCompute one-hot native field v11
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_onehot_v11.hpp'
+      - 'experiments/trucompute_onehot_v11_test.cpp'
+      - 'docs/TRUCOMPUTE_ONEHOT_NATIVE_FIELD_v11.0.md'
+      - '.github/workflows/trucompute-onehot-v11.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_onehot_v11_test.cpp -o onehot_v11
+
+      - name: One-hot and Boolean node conformance
+        run: |
+          ./onehot_v11 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_ONEHOT_FIELD_V11=PASS$' selftest.log
+          grep -q '^page_button_true_count=1$' selftest.log
+          grep -q '^page_button_false_count=999$' selftest.log
+          grep -q '^character_button_true_count=1$' selftest.log
+          grep -q '^character_button_false_count=205$' selftest.log
+          grep -q '^data_node_outputs=TRUE_OR_FALSE_ONLY$' selftest.log
+          grep -q '^button_press_forces_peer_labels_false=PASS$' selftest.log
+          grep -q '^buttons_are_runtime_control_not_source_artifact=PASS$' selftest.log
+          grep -q '^data_imprint_mutated_by_button_press=false$' selftest.log
+
+      - name: Build representable 4-page and 8-page fixtures
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          POS=64
+          def make(pages):
+              out=[]
+              for q in range(pages):
+                  for pos in range(POS):
+                      value=(pos % 80) + ((pos % 5)+1)*q
+                      assert value < 206
+                      out.append(value)
+              return bytes(out)
+          Path("source4.bin").write_bytes(make(4))
+          Path("source8.bin").write_bytes(make(8))
+          PY
+          test "$(stat -c%s source4.bin)" = "256"
+          test "$(stat -c%s source8.bin)" = "512"
+          sha256sum source4.bin > source4.sha
+          sha256sum source8.bin > source8.sha
+
+      - name: Freeze 4 pages
+        run: |
+          ./onehot_v11 freeze source4.bin field4.tru | tee freeze4.log
+          grep -q '^status=ONEHOT_NATIVE_FIELD_FROZEN$' freeze4.log
+          grep -q '^page_buttons_persisted_in_artifact=false$' freeze4.log
+          grep -q '^character_buttons_persisted_in_artifact=false$' freeze4.log
+          grep -q '^page_response_table=false$' freeze4.log
+          grep -q '^character_response_table=false$' freeze4.log
+          grep -q '^residual_bytes=0$' freeze4.log
+
+      - name: Freeze 8 pages with same fixed artifact geometry
+        run: |
+          ./onehot_v11 freeze source8.bin field8.tru | tee freeze8.log
+          grep -q '^status=ONEHOT_NATIVE_FIELD_FROZEN$' freeze8.log
+          test "$(stat -c%s field4.tru)" = "$(stat -c%s field8.tru)"
+          echo 'artifact_size_independent_of_imprinted_page_count=PASS' | tee fixed_size.log
+
+      - name: Delete sources and exact cold replay
+        run: |
+          rm source4.bin source8.bin
+          test ! -e source4.bin
+          test ! -e source8.bin
+          ./onehot_v11 replay field4.tru recovered4.bin | tee replay4.log
+          ./onehot_v11 replay field8.tru recovered8.bin | tee replay8.log
+          test "$(sha256sum recovered4.bin | awk '{print $1}')" = "$(awk '{print $1}' source4.sha)"
+          test "$(sha256sum recovered8.bin | awk '{print $1}')" = "$(awk '{print $1}' source8.sha)"
+          grep -q '^status=ONEHOT_NATIVE_EXACT_REPLAY_PASS$' replay4.log
+          grep -q '^status=ONEHOT_NATIVE_EXACT_REPLAY_PASS$' replay8.log
+          grep -q '^page_buttons_true=1$' replay8.log
+          grep -q '^page_buttons_false=999$' replay8.log
+          grep -q '^character_buttons_true=1$' replay8.log
+          grep -q '^character_buttons_false=205$' replay8.log
+          grep -q '^data_outputs_nonboolean=0$' replay8.log
+
+      - name: Prove fixed capacity failure does not grow state
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          POS=64
+          pages=9
+          out=[]
+          for q in range(pages):
+              for pos in range(POS):
+                  value=(pos % 80) + ((pos % 5)+1)*q
+                  if q==8 and pos==0:
+                      value += 1
+                  assert value < 206
+                  out.append(value)
+          Path("source9_fail.bin").write_bytes(bytes(out))
+          PY
+          set +e
+          ./onehot_v11 freeze source9_fail.bin should_not_exist.tru | tee capacity.log
+          rc=\${PIPESTATUS[0]}
+          set -e
+          test "$rc" = "2"
+          grep -q '^status=CAPACITY_EXCEEDED' capacity.log
+          grep -q 'artifact_created=false' capacity.log
+          test ! -e should_not_exist.tru
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-onehot-v11
+          path: |
+            selftest.log
+            freeze4.log
+            freeze8.log
+            replay4.log
+            replay8.log
+            fixed_size.log
+            capacity.log
+            source4.sha
+            source8.sha
