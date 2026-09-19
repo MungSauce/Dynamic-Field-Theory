@@ -1,0 +1,25 @@
+name: TruCompute Temporal Freeze v15
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - trucompute-temporal-freeze-v15-20260918
+    paths:
+      - "trucompute/trucompute_temporal_freeze_v15.hpp"
+      - "trucompute/trucompute_temporal_freeze_v15.cpp"
+      - "trucompute/TRUCOMPUTE_TEMPORAL_FREEZE_V15.md"
+      - ".github/workflows/trupute-temporal-freeze-v15.yml"
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          g++ -O2 -std=c++17 -Wall -Wextra -pedantic \
+            trucompute/trucompute_temporal_freeze_v15.cpp \
+            -o trucompute_temporal_v15
+      - name: Conformance
+        run: ./trucompute_temporal_v15
