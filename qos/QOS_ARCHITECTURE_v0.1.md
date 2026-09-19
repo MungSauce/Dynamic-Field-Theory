@@ -64,7 +64,7 @@ The assembler emits compact QBIN bytecode. The boot kernel executes QBIN directl
 
 The reference kernel is a freestanding 32-bit x86 Multiboot2 image. GRUB is only the boot transport. After entry, the kernel executes without a host operating system or standard library.
 
-The boot conformance program creates a three-node topology, applies a strike, settles sparse propagation, verifies all three terminal states, and reports through serial output.
+The kernel does not embed the Q program. GRUB loads a separately compiled `boot.qbin` Multiboot2 module; Q-OS discovers that module at boot and executes it through the QBIN loader. The conformance module creates a three-node topology, applies a strike, settles sparse propagation, verifies all three terminal states, and reports through serial output.
 
 ## Non-goals for v0.1
 
