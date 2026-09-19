@@ -52,6 +52,14 @@ struct Machine {
     std::vector<uint8_t> program_bits;
     uint64_t source_length = 0;
 
+    // Lifecycle state is task-level. The machine powers into RUN once,
+    // remains live across every page/character selector change, and stops
+    // only when the task emits DONE.
+    bool running = false;
+    uint16_t displayed_page = 0;
+    uint16_t displayed_character = 0;
+    bool selector_valid = false;
+
     Machine() : program_bits(MACHINE_BYTES, 0) {}
 
     uint8_t program(uint32_t node) const {
@@ -65,20 +73,55 @@ struct Machine {
         else x &= uint8_t(~mask);
     }
 
+    void begin_task() {
+        running = true;
+        selector_valid = false;
+    }
+
+    void display_page(uint16_t page) {
+        if (!running || page >= PAGE_BUTTONS)
+            throw std::runtime_error("page selector invalid");
+        displayed_page = page;
+        selector_valid = false;
+    }
+
+    void display_character(uint16_t character) {
+        if (!running || character >= CHAR_BUTTONS)
+            throw std::runtime_error("character selector invalid");
+        displayed_character = character;
+        selector_valid = true;
+    }
+
+    void done() {
+        selector_valid = false;
+        running = false;
+    }
+
     // HMC node boundary has exactly three observable responses:
     // POS = YES, NEG = NO, NEITHER = NO SIGNAL.
-    // STATELESS_ZERO is an internal TruCompute settlement condition and is
-    // never emitted as an HMC payload answer.
-    State press(uint16_t page, uint16_t character, uint32_t node) const {
-        if (page >= PAGE_BUTTONS || character >= CHAR_BUTTONS || node >= NODE_COUNT)
+    // The machine itself remains RUNNING across selector changes.
+    State observe(uint32_t node) const {
+        if (!running || !selector_valid || node >= NODE_COUNT)
             return State::NEITHER;
 
-        const uint64_t absolute = uint64_t(page) * PAGE_SIZE + node;
+        const uint64_t absolute =
+            uint64_t(displayed_page) * PAGE_SIZE + node;
         if (absolute >= source_length)
             return State::NEITHER;
 
-        const uint8_t expressed = candidate(node, page, program(node));
-        return expressed == character ? State::POS : State::NEG;
+        const uint8_t expressed =
+            candidate(node, displayed_page, program(node));
+        return expressed == displayed_character ? State::POS : State::NEG;
+    }
+
+    // Compatibility helper for tests. It changes selector voltages without
+    // cycling machine power.
+    State press(uint16_t page, uint16_t character, uint32_t node) {
+        if (!running) begin_task();
+        if (displayed_page != page || !selector_valid)
+            display_page(page);
+        display_character(character);
+        return observe(node);
     }
 
     uint8_t decoded_terminal(uint16_t page, uint32_t node) const {
@@ -254,7 +297,8 @@ static int imprint(const std::string &source_path, const std::string &artifact_p
 static int replay(const std::string &artifact_path,
                   const std::string &output_path,
                   bool strict_buttons) {
-    const Machine m=load(artifact_path);
+    Machine m=load(artifact_path);
+    m.begin_task();
     std::ofstream out(output_path,std::ios::binary);
     if(!out) throw std::runtime_error("open output failed");
 
@@ -268,11 +312,12 @@ static int replay(const std::string &artifact_path,
         if(strict_buttons){
             std::vector<int16_t> resolved(count,-1);
 
-            // Exactly one page selector is displayed; character selectors
-            // are then pressed in their fixed 0..205 order.
+            // Machine remains RUNNING. Only the displayed voltages change.
+            m.display_page(page);
             for(uint16_t character=0; character<CHAR_BUTTONS; ++character){
+                m.display_character(character);
                 for(uint32_t node=0; node<count; ++node){
-                    const State s=m.press(page,character,node);
+                    const State s=m.observe(node);
                     if(s==State::POS){
                         if(resolved[node]!=-1){
                             std::cout<<"status=AMBIGUOUS\npage="<<page
@@ -298,6 +343,7 @@ static int replay(const std::string &artifact_path,
                 out.write(reinterpret_cast<const char*>(&terminal),1);
             }
         } else {
+            m.display_page(page);
             for(uint32_t node=0; node<count; ++node){
                 const uint8_t terminal=m.decoded_terminal(page,node);
                 out.write(reinterpret_cast<const char*>(&terminal),1);
@@ -310,8 +356,11 @@ static int replay(const std::string &artifact_path,
                  <<" recovered="<<count<<"\n";
     }
 
+    m.done();
     std::cout<<"status=REPLAY_PASS\nrecovered_bytes="<<written
-             <<"\ncontrol_buttons="<<CONTROL_BUTTONS<<"\n";
+             <<"\ncontrol_buttons="<<CONTROL_BUTTONS
+             <<"\npower_cycles=1"
+             <<"\nrun_lifecycle=BEGIN_ONCE__SELECTORS_CHANGE__DONE_ONCE\n";
     return 0;
 }
 
@@ -352,27 +401,39 @@ static int selftest(){
     // Blank machine: structurally present nodes, but no imprinted source means
     // every HMC interrogation produces NO SIGNAL.
     Machine blank_machine;
+    blank_machine.begin_task();
+    blank_machine.display_page(0);
     for(uint32_t node=0; node<100; ++node){
         for(uint16_t c=0; c<CHAR_BUTTONS; ++c){
-            if(blank_machine.press(0,c,node) != State::NEITHER) return 7;
+            blank_machine.display_character(c);
+            if(blank_machine.observe(node) != State::NEITHER) return 7;
         }
     }
+    if(!blank_machine.running) return 8;
+    blank_machine.done();
+    if(blank_machine.running) return 9;
 
-    // Active HMC position: exactly one YES, all remaining character buttons NO,
-    // and no NO SIGNAL for a valid source position.
+    // Active HMC position: machine starts once and remains RUNNING while
+    // all 206 character selector voltages are swept.
     Machine active_machine;
     active_machine.source_length = 100;
+    active_machine.begin_task();
+    active_machine.display_page(0);
     for(uint32_t node=0; node<100; ++node){
         int yes=0, no=0, no_signal=0, stateless=0;
         for(uint16_t c=0;c<CHAR_BUTTONS;++c){
-            const State s=active_machine.press(0,c,node);
+            active_machine.display_character(c);
+            const State s=active_machine.observe(node);
             if(s==State::POS) ++yes;
             else if(s==State::NEG) ++no;
             else if(s==State::NEITHER) ++no_signal;
             else if(s==State::STATELESS_ZERO) ++stateless;
         }
-        if(yes!=1 || no!=205 || no_signal!=0 || stateless!=0) return 8;
+        if(yes!=1 || no!=205 || no_signal!=0 || stateless!=0) return 10;
+        if(!active_machine.running) return 11;
     }
+    active_machine.done();
+    if(active_machine.running) return 12;
 
     std::cout
         <<"TRUCOMPUTE_V3_CONFORMANCE=PASS\n"
@@ -382,7 +443,9 @@ static int selftest(){
         <<"character_buttons="<<CHAR_BUTTONS<<"\n"
         <<"control_buttons="<<CONTROL_BUTTONS<<"\n"
         <<"node_to_node_relations=0\n"
-        <<"program_bits_per_node=1\n";
+        <<"program_bits_per_node=1\n"
+        <<"power_cycles_per_task=1\n"
+        <<"selector_changes_do_not_power_cycle=true\n";
     return 0;
 }
 
