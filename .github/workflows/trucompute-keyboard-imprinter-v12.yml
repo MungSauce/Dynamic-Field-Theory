@@ -1,0 +1,97 @@
+name: TruCompute keyboard imprinter v12
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_keyboard_imprinter_v12.hpp'
+      - 'experiments/trucompute_keyboard_imprinter_v12_test.cpp'
+      - 'docs/TRUCOMPUTE_KEYBOARD_IMPRINT_ARCHITECTURE_v12.0.md'
+      - '.github/workflows/trucompute-keyboard-imprinter-v12.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_keyboard_imprinter_v12_test.cpp -o keyboard_v12
+
+      - name: Shared keyboard interface self-test
+        run: |
+          ./keyboard_v12 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_KEYBOARD_IMPRINTER_V12=PASS$' selftest.log
+          grep -q '^writer_interface=SAME_206_CHARACTER_BUTTONS_AS_READER$' selftest.log
+          grep -q '^physical_character_buttons=206$' selftest.log
+          grep -q '^separate_terminal_map=false$' selftest.log
+          grep -q '^parser_mode=READ_ONE_CHARACTER_THEN_PRESS_KEY$' selftest.log
+          grep -q '^finished_product=HAND_TUNED_MACHINE$' selftest.log
+
+      - name: Build eight-page fixture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          POS=64
+          alphabet=b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+          Path("source.bin").write_bytes(bytes(alphabet[(p+q)%len(alphabet)] for q in range(8) for p in range(POS)))
+          PY
+          test "$(stat -c%s source.bin)" = "512"
+          sha256sum source.bin > source.sha
+
+      - name: Type source into machine
+        run: |
+          ./keyboard_v12 freeze source.bin machine.tru | tee freeze.log
+          grep -q '^status=HAND_TUNED_MACHINE_FROZEN$' freeze.log
+          grep -q '^physical_character_buttons=206$' freeze.log
+          grep -q '^separate_terminal_map=false$' freeze.log
+          grep -q '^writer_interface=KEYBOARD$' freeze.log
+          grep -q '^reader_interface=KEYBOARD$' freeze.log
+          grep -q '^page_buffer_bytes=0$' freeze.log
+          grep -q '^source_copy_bytes_during_imprint=0$' freeze.log
+          grep -q '^finished_product=HAND_TUNED_MACHINE$' freeze.log
+
+      - name: Delete source and replay through same keyboard
+        run: |
+          rm source.bin
+          test ! -e source.bin
+          ./keyboard_v12 replay machine.tru recovered.bin | tee replay.log
+          grep -q '^status=HAND_TUNED_MACHINE_EXACT_REPLAY_PASS$' replay.log
+          grep -q '^physical_character_buttons=206$' replay.log
+          grep -q '^separate_terminal_map=false$' replay.log
+          test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha)"
+
+      - name: Bounded ninth-page failure
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          POS=64
+          alphabet=b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+          out=[]
+          for q in range(9):
+              for p in range(POS):
+                  x=alphabet[(p+q)%len(alphabet)]
+                  if q==8 and p==0:
+                      x=alphabet[(alphabet.index(x)+1)%len(alphabet)]
+                  out.append(x)
+          Path("source9.bin").write_bytes(bytes(out))
+          PY
+          set +e
+          ./keyboard_v12 freeze source9.bin should_not_exist.tru > capacity.log 2>&1
+          rc=$?
+          set -e
+          test "$rc" = "2"
+          grep -q '^status=CAPACITY_EXCEEDED' capacity.log
+          grep -q 'artifact_created=false' capacity.log
+          test ! -e should_not_exist.tru
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-keyboard-imprinter-v12
+          path: |
+            selftest.log
+            freeze.log
+            replay.log
+            capacity.log
+            source.sha
