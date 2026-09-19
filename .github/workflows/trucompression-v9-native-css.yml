@@ -1,0 +1,55 @@
+name: TruCompression v9 native-law CSS conformance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_native_law_v4.hpp'
+      - 'trucompression/trucompression_css_native_v9.cpp'
+      - '.github/workflows/trucompression-v9-native-css.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O3 -std=c++17 trucompression/trucompression_css_native_v9.cpp -o css_native_v9
+      - name: Native-law self-test
+        run: |
+          ./css_native_v9 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_NATIVE_LAW_V4=PASS$' selftest.log
+          grep -q '^CSS_NATIVE_OVERLAY_V9=PASS$' selftest.log
+          grep -q '^node_retained_state_bytes=0$' selftest.log
+          grep -q '^observations_retained_in_nodes=false$' selftest.log
+      - name: Build deterministic source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          data=(b"native-law-css-overlay\n"*1000)
+          Path("source.bin").write_bytes(data[:10000])
+          PY
+          sha256sum source.bin > source.sha
+      - name: Freeze native CSS field
+        run: |
+          ./css_native_v9 train source.bin source.css 10000 | tee train.log
+          grep -q '^status=FROZEN' train.log
+          grep -q 'node_retained_state_bytes=0' train.log
+          grep -q 'persistent_page_banks=0' train.log
+          grep -q 'persistent_character_tables=0' train.log
+      - name: Delete source and cold replay
+        run: |
+          rm source.bin
+          test ! -e source.bin
+          ./css_native_v9 replay source.css recovered.bin | tee replay.log
+          test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha)"
+          grep -q '^status=REPLAY_PASS' replay.log
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-v9-native-css
+          path: |
+            selftest.log
+            train.log
+            replay.log

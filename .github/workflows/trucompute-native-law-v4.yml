@@ -1,0 +1,31 @@
+name: TruCompute native environmental law v4
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_native_law_v4.hpp'
+      - 'experiments/trucompute_native_law_v4_test.cpp'
+      - 'docs/TRUCOMPUTE_NATIVE_ENVIRONMENTAL_LAW_v4.0.md'
+      - '.github/workflows/trucompute-native-law-v4.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_native_law_v4_test.cpp -o native_law_test
+      - name: Run native-law conformance
+        run: |
+          ./native_law_test | tee native_law.log
+          grep -q '^TRUCOMPUTE_NATIVE_LAW_V4=PASS$' native_law.log
+          grep -q '^node_retained_state_bytes=0$' native_law.log
+          grep -q '^observation_is_law_result=true$' native_law.log
+          grep -q '^selector_changes_observation_without_node_mutation=true$' native_law.log
+          grep -q '^stateless_zero_is_participating_result=true$' native_law.log
+          grep -q '^neither_is_no_participation=true$' native_law.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-native-law-v4
+          path: native_law.log

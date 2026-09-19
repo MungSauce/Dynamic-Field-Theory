@@ -1,0 +1,84 @@
+name: TruCompression v9 native-law CSS enwik9 imprint test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/trucompression-v9-enwik9-imprint.yml'
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build native-law CSS
+        run: g++ -O3 -std=c++17 trucompression/trucompression_css_native_v9.cpp -o css_native_v9
+
+      - name: Native-law conformance
+        run: |
+          ./css_native_v9 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_NATIVE_LAW_V4=PASS$' selftest.log
+          grep -q '^CSS_NATIVE_OVERLAY_V9=PASS$' selftest.log
+          grep -q '^node_retained_state_bytes=0$' selftest.log
+          grep -q '^observations_retained_in_nodes=false$' selftest.log
+
+      - name: Download canonical enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          test "$(md5sum enwik9 | awk '{print $1}')" = "e206c3450ac99950df65bf70ef61a12d"
+          test "$(sha256sum enwik9 | awk '{print $1}')" = "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc"
+
+      - name: Imprint full corpus into one CSS field
+        run: |
+          set +e
+          ./css_native_v9 train enwik9 enwik9.css 1000000000 | tee imprint.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "imprint_exit_code=$rc" | tee result.log
+          if grep -q '^status=FROZEN' imprint.log; then
+            echo "imprint_status=FROZEN" | tee -a result.log
+            stat -c 'artifact_bytes=%s' enwik9.css | tee -a result.log
+            sha256sum enwik9.css | tee artifact.sha256
+          elif grep -q '^status=RELATIONAL_CONTRADICTION' imprint.log; then
+            echo "imprint_status=RELATIONAL_CONTRADICTION" | tee -a result.log
+            grep '^status=RELATIONAL_CONTRADICTION' imprint.log | tee -a result.log
+            test ! -e enwik9.css
+          elif grep -q '^status=PREFREEZE_REPLAY_FAIL' imprint.log; then
+            echo "imprint_status=PREFREEZE_REPLAY_FAIL" | tee -a result.log
+            grep '^status=PREFREEZE_REPLAY_FAIL' imprint.log | tee -a result.log
+          else
+            echo "imprint_status=UNEXPECTED_FAILURE" | tee -a result.log
+            exit 1
+          fi
+
+      - name: Cold replay only if frozen
+        run: |
+          if grep -q '^status=FROZEN' imprint.log; then
+            sha256sum enwik9 > source.sha
+            rm -f enwik9 enwik9.zip
+            test ! -e enwik9
+            test ! -e enwik9.zip
+            ./css_native_v9 replay enwik9.css recovered.bin | tee replay.log
+            test "$(stat -c%s recovered.bin)" = "1000000000"
+            test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha)"
+            test "$(md5sum recovered.bin | awk '{print $1}')" = "e206c3450ac99950df65bf70ef61a12d"
+            echo "source_isolated_replay=PASS" | tee -a result.log
+          else
+            echo "source_isolated_replay=NOT_REACHED" | tee replay.log
+          fi
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-v9-native-css-enwik9
+          path: |
+            selftest.log
+            imprint.log
+            result.log
+            replay.log
+            artifact.sha256
