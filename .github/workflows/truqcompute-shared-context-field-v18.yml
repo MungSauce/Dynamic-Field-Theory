@@ -1,0 +1,21 @@
+name: TruCompute Shared Context Field v18
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - trucompute-shared-context-field-v18-20260918
+    paths:
+      - "trucompute/truqcompute_shared_context_field_v18.cpp"
+      - "trucompute/TRUCOMPUTE_SHARED_CONTEXT_FIELD_V18.md"
+      - ".github/workflows/truqcompute-shared-context-field-v18.yml"
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O2 -std=c++17 -Wall -Wextra -pedantic trucompute/truqcompute_shared_context_field_v18.cpp -o /tmp/truqcompute_shared_context_field_v18
+      - name: Run
+        run: /tmp/truqcompute_shared_context_field_v18
