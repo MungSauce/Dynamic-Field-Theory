@@ -1,7 +1,7 @@
 # TruCompression Canonical Architecture v2.0
 
 **Date:** 2026-09-18  
-**Status:** CANONICAL ARCHITECTURE / MEASURED IMPLEMENTATION PENDING CI  
+**Status:** CANONICAL ARCHITECTURE / MEASURED IMPLEMENTATION  
 **Implementation:** `trucompression/trucompression_hmc_v6.cpp`.replace("trucompression","trucompression")
 
 ## 1. Machine
@@ -160,7 +160,26 @@ For a source requiring larger rank than the preselected machine, imprinting fail
 
 The purpose of v6 is therefore to finish the architecture as an exact, auditable TruCompute-dependent relational compressor, while leaving empirical compression performance to measurement rather than assumption.
 
-## 9. Evidence labels
+## 9. Measured canonical conformance
+
+GitHub Actions workflow run **35414517770** completed successfully on the canonical branch.
+
+Measured gates:
+
+- TruCompute v3 conformance: PASS;
+- TruCompression HMC v6 self-test: PASS;
+- 1,206 controls: PASS;
+- zero node-to-node document relations: PASS;
+- fixed R=2 blank artifact: 2,002,512 bytes;
+- strict HMC source-isolated exact replay: PASS;
+- cross-page source-isolated exact replay: PASS;
+- task-level power cycles: 1;
+- deliberate rank-3 source against fixed R=2 machine: CAPACITY_EXCEEDED;
+- machine growth on capacity failure: 0.
+
+The capacity-failure test is part of the PASS condition because it demonstrates that the implementation refuses to enlarge the preselected machine.
+
+## 10. Evidence labels
 
 - CANONICAL — architecture/invariant.
 - MEASURED — directly executed result.
