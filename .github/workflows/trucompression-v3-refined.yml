@@ -1,0 +1,99 @@
+name: TruCompression v3 refined machine test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_runtime_v3.hpp'
+      - 'trucompression/trucompression_native_v3.cpp'
+      - '.github/workflows/trucompression-v3-refined.yml'
+
+jobs:
+  refined:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: g++ -O3 -std=c++17 trucompression/trucompression_native_v3.cpp -o trucompression_v3
+
+      - name: Four-condition conformance
+        run: ./trucompression_v3 selftest
+
+      - name: Serialize untouched blank machine
+        run: |
+          ./trucompression_v3 blank blank.truc | tee blank.log
+          test "$(stat -c%s blank.truc)" = "125064"
+          grep -q '^status=BLANK_FROZEN$' blank.log
+          grep -q '^physical_nodes=1000000$' blank.log
+          grep -q '^structurally_live_nodes=1000000$' blank.log
+          grep -q '^machine_payload_bytes=125000$' blank.log
+          grep -q '^artifact_bytes=125064$' blank.log
+          grep -q '^inactive_signal=NEITHER$' blank.log
+          ./trucompression_v3 replay blank.truc blank.out --strict-buttons | tee blank_replay.log
+          test "$(stat -c%s blank.out)" = "0"
+          grep -q '^status=REPLAY_PASS$' blank_replay.log
+          grep -q '^recovered_bytes=0$' blank_replay.log
+
+      - name: Generate refined corpus set
+        run: |
+          python3 - <<'PY'
+          import random
+          from pathlib import Path
+
+          N = 200_000
+          Path("repeat_A.bin").write_bytes(b"A" * N)
+          pattern = bytes(range(256))
+          Path("cycle_0_255.bin").write_bytes((pattern * ((N + 255)//256))[:N])
+          phrase = (
+              b"TruCompression tests relational structure over one fixed machine. "
+              b"The page and character controls repeat in a fixed order. "
+          )
+          Path("repeated_text.bin").write_bytes((phrase * ((N + len(phrase)-1)//len(phrase)))[:N])
+
+          r = random.Random(12345)
+          Path("random.bin").write_bytes(bytes(r.randrange(256) for _ in range(N)))
+          PY
+
+      - name: Measure imprint boundary by source structure
+        run: |
+          : > refined_summary.txt
+          for src in repeat_A.bin cycle_0_255.bin repeated_text.bin random.bin; do
+            artifact="${src%.bin}.truc"
+            out="${src%.bin}.out"
+            log="${src%.bin}.log"
+
+            set +e
+            ./trucompression_v3 imprint "$src" "$artifact" > "$log"
+            rc=$?
+            set -e
+
+            echo "=== $src rc=$rc ===" | tee -a refined_summary.txt
+            cat "$log" | tee -a refined_summary.txt
+
+            if [ "$rc" = "0" ]; then
+              test "$(stat -c%s "$artifact")" = "125064"
+              sha256sum "$src" > "${src}.sha256"
+              rm "$src"
+              ./trucompression_v3 replay "$artifact" "$out" --strict-buttons | tee -a refined_summary.txt
+              REC=$(sha256sum "$out" | awk '{print $1}')
+              SRC=$(awk '{print $1}' "${src}.sha256")
+              test "$REC" = "$SRC"
+            elif [ "$rc" = "2" ]; then
+              grep -q '^status=IMPRINT_CONTRADICTION$' "$log"
+              grep -q '^machine_growth=0$' "$log"
+              test ! -e "$artifact"
+            else
+              exit "$rc"
+            fi
+          done
+          cat refined_summary.txt
+
+      - name: Preserve refined evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-v3-refined-results
+          path: |
+            blank.log
+            blank_replay.log
+            refined_summary.txt
