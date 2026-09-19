@@ -1,0 +1,45 @@
+name: TruCompute EIS Signal v20
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - trucompute-eis-signal-v20-20260918
+    paths:
+      - "trucompute/truqcompute_eis_signal_v20.py"
+      - "eis_k32/**"
+      - "trucompute/TRUCOMPUTE_EIS_SIGNAL_V20.md"
+      - ".github/workflows/truqcompute-eis-signal-v20.yml"
+
+jobs:
+  exact-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install numpy
+      - name: Generate structured PCM signal fixture
+        run: |
+          python - <<'PY'
+          import numpy as np
+          sr=48000
+          nbytes=1<<20
+          nsamp=nbytes//2
+          t=np.arange(nsamp)/sr
+          sig=(0.45*np.sin(2*np.pi*440*t)+0.22*np.sin(2*np.pi*880*t)+0.12*np.sin(2*np.pi*1760*t))
+          sig*=0.5+0.5*np.sin(2*np.pi*0.4*t)
+          block=sr//2
+          for start in range(0,nsamp,block*4):
+              sig[start:start+block//4]=0
+          q=np.rint(np.clip(sig,-0.99,0.99)*32767).astype('<i2')
+          open('signal.raw','wb').write(q.tobytes()[:nbytes])
+          PY
+      - name: Run exact TruCompute-EIS probe
+        run: |
+          PYTHONPATH=. python trucompute/truqcompute_eis_signal_v20.py probe signal.raw | tee tc_eis_v20.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-eis-signal-v20
+          path: tc_eis_v20.json
