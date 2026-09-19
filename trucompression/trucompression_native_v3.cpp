@@ -228,6 +228,34 @@ static Machine load_machine(const std::string &path) {
     return m;
 }
 
+
+static int write_blank(const std::string &artifact_path) {
+    Machine machine;
+    machine.source_length = 0;
+
+    // A blank machine is already the complete physical machine.
+    // All retained polarity bits use their canonical untuned orientation.
+    // With no active control, every element observes as NEITHER.
+    for (uint32_t i = 0; i < NODE_COUNT; ++i) {
+        if (machine.observe_node(0, i, false) != State::NEITHER) {
+            std::cout << "status=BLANK_STATE_FAIL\nnode=" << i << "\n";
+            return 8;
+        }
+    }
+
+    save_machine(machine, artifact_path);
+
+    std::cout
+        << "status=BLANK_FROZEN\n"
+        << "physical_nodes=" << NODE_COUNT << "\n"
+        << "structurally_live_nodes=" << NODE_COUNT << "\n"
+        << "retained_polarity_bits=" << NODE_COUNT << "\n"
+        << "machine_payload_bytes=" << MACHINE_BYTES << "\n"
+        << "artifact_bytes=" << (sizeof(Header) + MACHINE_BYTES) << "\n"
+        << "inactive_signal=NEITHER\n";
+    return 0;
+}
+
 static int imprint(const std::string &source_path, const std::string &artifact_path) {
     const auto source = read_all(source_path);
     ParityDSU solver(NODE_COUNT);
@@ -383,6 +411,16 @@ static int selftest() {
     if (settle({+1, -1}) != State::STATELESS_ZERO) return 5;
     if (!stateless(settle({+1, -1}))) return 6;
     if (net(settle({+1, -1})) != 0) return 7;
+    if (combine(State::NEG, State::POS) != State::STATELESS_ZERO) return 8;
+    if (combine(State::NEITHER, State::POS) != State::POS) return 9;
+
+    bool neither_rejected = false;
+    try {
+        (void)net(State::NEITHER);
+    } catch (const std::runtime_error &) {
+        neither_rejected = true;
+    }
+    if (!neither_rejected) return 10;
 
     std::cout
         << "TRUCOMPUTE_V3_CONFORMANCE=PASS\n"
@@ -405,6 +443,9 @@ int main(int argc, char **argv) {
         if (argc == 2 && std::string(argv[1]) == "selftest")
             return selftest();
 
+        if (argc == 3 && std::string(argv[1]) == "blank")
+            return write_blank(argv[2]);
+
         if (argc == 4 && std::string(argv[1]) == "imprint")
             return imprint(argv[2], argv[3]);
 
@@ -415,6 +456,7 @@ int main(int argc, char **argv) {
         std::cerr
             << "usage:\n"
             << "  trucompression_v3 selftest\n"
+            << "  trucompression_v3 blank ARTIFACT\n"
             << "  trucompression_v3 imprint SOURCE ARTIFACT\n"
             << "  trucompression_v3 replay ARTIFACT OUTPUT [--strict-buttons]\n";
         return 64;
