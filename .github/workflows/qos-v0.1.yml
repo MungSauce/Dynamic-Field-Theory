@@ -1,0 +1,69 @@
+name: Q-OS v0.1 Boot Conformance
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - qos-v0.1-kernel-20260919
+    paths:
+      - "qos/**"
+      - ".github/workflows/qos-v0.1.yml"
+
+jobs:
+  boot-conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install boot-test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib grub-pc-bin grub-common xorriso qemu-system-x86
+
+      - name: Hosted conformance and freestanding kernel build
+        working-directory: qos
+        run: |
+          set -euxo pipefail
+          make clean test kernel
+          grub-file --is-x86-multiboot2 build/qos-kernel.elf
+
+      - name: Build bootable ISO
+        working-directory: qos
+        run: |
+          set -euxo pipefail
+          mkdir -p build/isodir/boot/grub
+          cp build/qos-kernel.elf build/isodir/boot/qos-kernel.elf
+          cat > build/isodir/boot/grub/grub.cfg <<'CFG'
+          set timeout=0
+          set default=0
+          menuentry "Q-OS v0.1" {
+              multiboot2 /boot/qos-kernel.elf
+              boot
+          }
+          CFG
+          grub-mkrescue -o build/qos-v0.1.iso build/isodir
+
+      - name: Cold boot in QEMU
+        working-directory: qos
+        run: |
+          set +e
+          timeout 20s qemu-system-i386             -cdrom build/qos-v0.1.iso             -display none             -serial file:build/qemu-serial.log             -no-reboot             -device isa-debug-exit,iobase=0xf4,iosize=0x04
+          rc=$?
+          set -e
+          cat build/qemu-serial.log
+          test "$rc" -eq 33
+          grep -q '^QOS_BOOT_CONFORMANCE=PASS$' build/qemu-serial.log
+          grep -q '^QBIN_EXEC=PASS$' build/qemu-serial.log
+          grep -q '^SPARSE_EXECUTION=PASS$' build/qemu-serial.log
+          grep -q '^NULL_TOPOLOGY=PASS$' build/qemu-serial.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qos-v0.1-boot
+          path: |
+            qos/build/qos-kernel.elf
+            qos/build/qos-v0.1.iso
+            qos/build/qemu-serial.log
+            qos/build/boot.qbin
