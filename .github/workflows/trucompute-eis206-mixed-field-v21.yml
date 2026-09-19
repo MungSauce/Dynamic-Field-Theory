@@ -1,0 +1,89 @@
+name: TruCompute EIS206 Mixed Field v21
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - trucompute-eis206-mixed-field-v21-20260918
+    paths:
+      - "trucompute/trucompute_eis206_mixed_field_v21.py"
+      - "trucompute/TRUCOMPUTE_EIS206_MIXED_FIELD_V21.md"
+      - ".github/workflows/trucompute-eis206-mixed-field-v21.yml"
+
+jobs:
+  exact-enwik9-prefix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime
+        run: python -m pip install numpy
+
+      - name: Fetch canonical enwik9 archive
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+
+      - name: Extract 64 KiB canonical prefix
+        run: |
+          python - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("enwik9.zip") as z:
+              with z.open("enwik9") as src, open("enwik9_64k","wb") as dst:
+                  dst.write(src.read(65536))
+          assert __import__("os").path.getsize("enwik9_64k") == 65536
+          PY
+
+      - name: Exact mixed-field probe
+        run: |
+          python trucompute/trucompute_eis206_mixed_field_v21.py probe enwik9_64k --prefix 65536 | tee EIS206_V21_ENWIK9_64K.json
+
+      - name: 206-symbol random control
+        run: |
+          python - <<'PY'
+          import random
+          r=random.Random(21)
+          open("random206_64k","wb").write(bytes(r.randrange(206) for _ in range(65536)))
+          PY
+          python trucompute/trucompute_eis206_mixed_field_v21.py probe random206_64k --prefix 65536 | tee EIS206_V21_RANDOM206_64K.json
+
+      - name: Summarize accounting
+        run: |
+          python - <<'PY'
+          import json, os
+          out={}
+          for name,path in [
+              ("enwik9_64k","EIS206_V21_ENWIK9_64K.json"),
+              ("random206_64k","EIS206_V21_RANDOM206_64K.json"),
+          ]:
+              d=json.load(open(path))
+              out[name]={
+                  "source_bytes":d["source_bytes"],
+                  "signal_file_bytes":d["signal_file_bytes"],
+                  "direct_zlib_bytes":d["direct_zlib_bytes"],
+                  "direct_lzma_bytes":d["direct_lzma_bytes"],
+                  "raw_artifact_bytes":d["backends"]["raw"]["artifact_bytes"],
+                  "tc_rle_artifact_bytes":d["backends"]["tc_rle"]["artifact_bytes"],
+                  "zlib_artifact_bytes":d["backends"]["zlib"]["artifact_bytes"],
+                  "lzma_artifact_bytes":d["backends"]["lzma"]["artifact_bytes"],
+                  "exact_source_all":all(v["exact_source"] for v in d["backends"].values()),
+                  "exact_signal_all":all(v["exact_signal"] for v in d["backends"].values()),
+                  "codec_script_bytes":d["codec_script_bytes"],
+              }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          open("EIS206_V21_SUMMARY.json","w").write(json.dumps(out,indent=2,sort_keys=True)+"\n")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trucompute-eis206-mixed-field-v21
+          path: |
+            EIS206_V21_ENWIK9_64K.json
+            EIS206_V21_RANDOM206_64K.json
+            EIS206_V21_SUMMARY.json
