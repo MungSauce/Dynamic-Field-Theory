@@ -1,0 +1,90 @@
+name: TruCompute conditioned overlay conformance v3
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_native_field_v7.hpp'
+      - 'experiments/trucompute_conditioned_overlay_conformance_v3.cpp'
+      - '.github/workflows/trucompute-conditioned-overlay-conformance-v3.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_conditioned_overlay_conformance_v3.cpp -o overlay_v3
+
+      - name: Validate corrected TruCompute semantics
+        run: |
+          ./overlay_v3 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_OVERLAY_V3_SELFTEST=PASS$' selftest.log
+          grep -q '^neither_only_at_power_switch=PASS$' selftest.log
+          grep -q '^active_zero_is_both=PASS$' selftest.log
+          grep -q '^empty_active_operation_rejected=PASS$' selftest.log
+          grep -q '^data_nodes_always_true_or_false=PASS$' selftest.log
+          grep -q '^unselected_activators_emit_no_state=PASS$' selftest.log
+          grep -q '^same_node_multi_condition_coexistence=PASS$' selftest.log
+          grep -q '^selector_switch_reversible=PASS$' selftest.log
+
+      - name: Build four-page source fixture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          data=bytes(((q*37+p*11+3)%206) for q in range(4) for p in range(64))
+          Path("source.bin").write_bytes(data)
+          PY
+          test "$(stat -c%s source.bin)" = "256"
+          sha256sum source.bin | tee source.sha256
+
+      - name: Freeze one conditioned field
+        run: |
+          ./overlay_v3 freeze source.bin overlay.field | tee freeze.log
+          grep -q '^status=CONDITIONED_FIELD_FROZEN$' freeze.log
+          grep -q '^prefreeze_exact_replay=PASS$' freeze.log
+          grep -q '^artifact_purpose=CONFORMANCE_ONLY_NOT_COMPRESSION$' freeze.log
+          sha256sum overlay.field | tee field.before.sha256
+
+      - name: Delete source
+        run: |
+          rm source.bin
+          test ! -e source.bin
+
+      - name: Reload field and exact selector replay
+        run: |
+          ./overlay_v3 replay overlay.field recovered.bin | tee replay.log
+          grep -q '^status=CONDITIONED_OVERLAY_EXACT_REPLAY_PASS$' replay.log
+          grep -q '^recovered_bytes=256$' replay.log
+          grep -q '^query_frames=824$' replay.log
+          grep -q '^data_true_responses=256$' replay.log
+          grep -q '^data_false_responses=52480$' replay.log
+          grep -q '^data_nonboolean_responses=0$' replay.log
+          grep -q '^selected_page_activator_events=824$' replay.log
+          grep -q '^unselected_page_activator_events=2472$' replay.log
+          grep -q '^selected_character_activator_events=824$' replay.log
+          grep -q '^unselected_character_activator_events=168920$' replay.log
+          grep -q '^neither_seen_during_active_queries=0$' replay.log
+          grep -q '^final_switch_state=NEITHER$' replay.log
+          test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha256)"
+
+      - name: Prove selector operations do not mutate frozen field
+        run: |
+          sha256sum overlay.field | tee field.after.sha256
+          test "$(awk '{print $1}' field.before.sha256)" = "$(awk '{print $1}' field.after.sha256)"
+          echo "frozen_field_immutable=PASS" | tee immutability.log
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-conditioned-overlay-conformance-v3
+          path: |
+            selftest.log
+            freeze.log
+            replay.log
+            source.sha256
+            field.before.sha256
+            field.after.sha256
+            immutability.log

@@ -1,0 +1,87 @@
+name: TruCompute native BOTH collapse conformance v8
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_native_collapse_v8.hpp'
+      - 'experiments/trucompute_native_collapse_conformance_v8.cpp'
+      - '.github/workflows/trucompute-native-collapse-v8.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_native_collapse_conformance_v8.cpp -o native_collapse_v8
+
+      - name: Prove native BOTH and transient collapse
+        run: |
+          ./native_collapse_v8 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_NATIVE_COLLAPSE_V8=PASS$' selftest.log
+          grep -q '^native_field_rest_state=BOTH$' selftest.log
+          grep -q '^neither_scope=POWER_SWITCH_ONLY$' selftest.log
+          grep -q '^observation_collapse=POS_OR_NEG_ONLY$' selftest.log
+          grep -q '^collapse_mutates_native_field=false$' selftest.log
+          grep -q '^conditioned_overlays_coexist=PASS$' selftest.log
+          grep -q '^selector_revisit=PASS$' selftest.log
+
+      - name: Build conditioned overlay fixture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          data=bytes(((q*37+p*11+3)%206) for q in range(4) for p in range(64))
+          Path("source.bin").write_bytes(data)
+          PY
+          test "$(stat -c%s source.bin)" = "256"
+          sha256sum source.bin | tee source.sha256
+
+      - name: Freeze one native field
+        run: |
+          ./native_collapse_v8 freeze source.bin field.tru | tee freeze.log
+          grep -q '^status=NATIVE_COLLAPSE_FIELD_FROZEN$' freeze.log
+          grep -q '^native_rest_state=BOTH$' freeze.log
+          grep -q '^prefreeze_exact_replay=PASS$' freeze.log
+          grep -q '^artifact_purpose=CONFORMANCE_ONLY_NOT_COMPRESSION$' freeze.log
+          sha256sum field.tru | tee field.before.sha256
+
+      - name: Delete source
+        run: |
+          rm source.bin
+          test ! -e source.bin
+
+      - name: Reload and exact replay
+        run: |
+          ./native_collapse_v8 replay field.tru recovered.bin | tee replay.log
+          grep -q '^status=NATIVE_COLLAPSE_EXACT_REPLAY_PASS$' replay.log
+          grep -q '^recovered_bytes=256$' replay.log
+          grep -q '^query_frames=824$' replay.log
+          grep -q '^true_collapses=256$' replay.log
+          grep -q '^false_collapses=52480$' replay.log
+          grep -q '^nonboolean_collapses=0$' replay.log
+          grep -q '^native_field_after_queries=BOTH$' replay.log
+          grep -q '^selector_revisit=PASS$' replay.log
+          grep -q '^final_switch_state=NEITHER$' replay.log
+          test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha256)"
+
+      - name: Prove observations did not mutate frozen field
+        run: |
+          sha256sum field.tru | tee field.after.sha256
+          test "$(awk '{print $1}' field.before.sha256)" = "$(awk '{print $1}' field.after.sha256)"
+          echo "frozen_field_immutable=PASS" | tee immutability.log
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-native-collapse-v8
+          path: |
+            selftest.log
+            freeze.log
+            replay.log
+            source.sha256
+            field.before.sha256
+            field.after.sha256
+            immutability.log
