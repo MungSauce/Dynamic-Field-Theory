@@ -40,7 +40,7 @@ struct Header {
     uint64_t payload_bytes;
     uint64_t relation_id;
     uint8_t terminals[CHAR_BUTTONS];
-    uint8_t reserved[246];
+    uint8_t reserved[250];
 };
 #pragma pack(pop)
 static_assert(sizeof(Header) == HEADER_BYTES);
@@ -244,7 +244,7 @@ public:
 
     void display_character(uint16_t c) {
         must(running_, "machine not running");
-        must(c < program_.header.terminal_count, "character selector");
+        must(c < CHAR_BUTTONS, "character selector");
         character_ = c;
         selector_valid_ = true;
     }
@@ -253,6 +253,7 @@ public:
         if (!running_ || !selector_valid_ || node >= NODE_COUNT) return State::NEITHER;
         const uint64_t absolute = uint64_t(page_) * PAGE_SIZE + node;
         if (absolute >= program_.header.source_length) return State::NEITHER;
+        if (character_ >= program_.header.terminal_count) return State::NEG;
         return page_bytes_[node] == program_.header.terminals[character_]
             ? State::POS : State::NEG;
     }
@@ -305,7 +306,7 @@ static int replay_cmd(const std::string& artifact, const std::string& output, bo
 
         if (strict_first_page && q == 0) {
             std::vector<int16_t> resolved(n, -1);
-            for (uint16_t c=0;c<p.header.terminal_count;++c) {
+            for (uint16_t c=0;c<CHAR_BUTTONS;++c) {
                 m.display_character(c);
                 for (uint32_t i=0;i<n;++i) {
                     State s = m.observe(i);
