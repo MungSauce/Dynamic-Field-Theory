@@ -43,3 +43,5 @@ jobs:
             WORD_PIXEL_V24_STREAM.json
             WORD_PIXEL_V24_BUFFER.json
             enwik9_64k.tcewp24
+
+# v24 header-fix verification
