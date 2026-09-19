@@ -1,0 +1,67 @@
+name: TruCompute Reflex Lexicon v22
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - trucompute-reflex-lexicon-v22-20260919
+    paths:
+      - "trucompute/trucompute_reflex_lexicon_v22.py"
+      - "trucompute/TRUCOMPUTE_REFLEX_LEXICON_V22.md"
+      - ".github/workflows/trucompute-reflex-lexicon-v22.yml"
+
+jobs:
+  enwik9-prefix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          python - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("enwik9.zip") as z:
+              with z.open("enwik9") as src, open("enwik9_64k","wb") as dst:
+                  dst.write(src.read(65536))
+          assert __import__("os").path.getsize("enwik9_64k") == 65536
+          PY
+
+      - name: Probe canonical 64 KiB prefix
+        run: |
+          python trucompute/trucompute_reflex_lexicon_v22.py probe enwik9_64k --prefix 65536 | tee REFLEX_V22_ENWIK9_64K.json
+
+      - name: Cold artifact replay
+        run: |
+          python trucompute/trucompute_reflex_lexicon_v22.py encode enwik9_64k enwik9_64k.tcr22 --backend lzma | tee REFLEX_V22_ENCODE.json
+          mv enwik9_64k enwik9_64k.original
+          python trucompute/trucompute_reflex_lexicon_v22.py decode enwik9_64k.tcr22 enwik9_64k.recovered | tee REFLEX_V22_DECODE.json
+          cmp enwik9_64k.original enwik9_64k.recovered
+          sha256sum enwik9_64k.original enwik9_64k.recovered
+
+      - name: Random-button control
+        run: |
+          python - <<'PY'
+          import random
+          r=random.Random(22)
+          vocab=[("w%04d"%i).encode() for i in range(1024)]
+          out=bytearray()
+          while len(out)<65536:
+              if out: out.extend(b" ")
+              out.extend(vocab[r.randrange(len(vocab))])
+          open("random_buttons_64k","wb").write(bytes(out[:65536]))
+          PY
+          python trucompute/trucompute_reflex_lexicon_v22.py probe random_buttons_64k --prefix 65536 | tee REFLEX_V22_RANDOM_64K.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trucompute-reflex-lexicon-v22
+          path: |
+            REFLEX_V22_ENWIK9_64K.json
+            REFLEX_V22_ENCODE.json
+            REFLEX_V22_DECODE.json
+            REFLEX_V22_RANDOM_64K.json
+            enwik9_64k.tcr22
