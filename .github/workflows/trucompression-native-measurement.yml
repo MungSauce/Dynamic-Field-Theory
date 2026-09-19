@@ -1,0 +1,34 @@
+name: TruCompression native machine measurement
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'experiments/trucompression_native_machine_measurement.cpp'
+      - '.github/workflows/trucompression-native-measurement.yml'
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native-machine meter
+        run: g++ -O3 -std=c++17 experiments/trucompression_native_machine_measurement.cpp -o native_measure
+      - name: Download and verify canonical enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          test "$(md5sum enwik9 | awk '{print $1}')" = "e206c3450ac99950df65bf70ef61a12d"
+      - name: Measure native TruCompression machine
+        run: |
+          ./native_measure enwik9 | tee native_measurement.txt
+          grep -q '^status=NATIVE_MACHINE_MEASURED$' native_measurement.txt
+          grep -q '^terminal_count=206$' native_measurement.txt
+          grep -q '^total_fixed_structural_elements=1001206$' native_measurement.txt
+          grep -q '^power_cycles_per_task=1$' native_measurement.txt
+      - name: Preserve measurement
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-native-machine-measurement
+          path: native_measurement.txt
