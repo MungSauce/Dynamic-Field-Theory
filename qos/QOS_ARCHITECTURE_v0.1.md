@@ -17,13 +17,13 @@ The first hardware target is conventional x86 silicon. Binary is permitted only 
 4. Separate allocation topology for structural presence.
 5. Directed topology edges.
 6. Positive and negative strikes.
-7. Sparse FIFO delta scheduler: unchanged nodes produce no new work.
+7. Sparse causal-wavefront delta scheduler: only touched nodes resolve; unchanged nodes produce no new work.
 8. Deterministic local interaction operators: Cascade, Deepen, Cancel, Sever.
 9. QBIN executable format generated from Q-ASM topology descriptions.
 
 ## Clock boundary
 
-The x86 host remains physically clocked. Q-OS does not expose a global software tick as its execution primitive. The Q-kernel advances only while Q-events exist.
+The x86 host remains physically clocked. Q-OS does not expose a global software tick as its execution primitive. The Q-kernel advances only while Q-events exist. Events at the same causal depth are resolved as a wavefront; that dependency boundary is not a periodic time source.
 
 ## Memory model
 
@@ -43,7 +43,9 @@ Resolution is local:
 
 `new_state = T(old_state, strike)`
 
-When `new_state == old_state`, execution ends for that path. When a delta occurs, outgoing edges transform and propagate the strike.
+Strikes arriving at the same causal depth are first summed per touched node. Opposing tension cancels before state resolution. Only touched nodes are visited; there is no full-grid polling.
+
+When `new_state == old_state`, execution ends for that path. When a delta occurs, outgoing edges transform and propagate the strike into the next causal wavefront.
 
 ## Q-ASM / QBIN
 
@@ -77,7 +79,8 @@ The Q-OS computational core is considered established when CI demonstrates all o
 - exact state-code mapping;
 - full eight-entry strike table;
 - Null/deallocation isolation;
-- Cascade and Cancel propagation;
+- Cascade, Deepen, and Cancel propagation;
+- same-wave opposing-strike cancellation independent of queue order;
 - Q-ASM -> QBIN compilation;
 - freestanding kernel link;
 - Multiboot2 recognition;
