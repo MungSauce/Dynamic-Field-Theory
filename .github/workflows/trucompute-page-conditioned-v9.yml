@@ -1,0 +1,85 @@
+name: TruCompute page-conditioned node conformance v9
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_page_conditioned_v9.hpp'
+      - 'experiments/trucompute_page_conditioned_conformance_v9.cpp'
+      - '.github/workflows/trucompute-page-conditioned-v9.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_page_conditioned_conformance_v9.cpp -o pc_v9
+
+      - name: Prove native conditional-node semantics
+        run: |
+          ./pc_v9 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_PAGE_CONDITIONED_V9=PASS$' selftest.log
+          grep -q '^data_nodes_continuously_powered=PASS$' selftest.log
+          grep -q '^unresolved_field_condition=BOTH$' selftest.log
+          grep -q '^resolution_condition=PAGE_PLUS_CHARACTER$' selftest.log
+          grep -q '^every_page_has_true_or_false_for_every_character=PASS$' selftest.log
+          grep -q '^same_node_changes_output_by_condition=PASS$' selftest.log
+          grep -q '^selector_revisit=PASS$' selftest.log
+          grep -q '^neither_scope=POWER_SWITCH_ONLY$' selftest.log
+
+      - name: Build fixture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          Path("source.bin").write_bytes(bytes(((q*37+p*11+3)%206) for q in range(4) for p in range(64)))
+          PY
+          test "$(stat -c%s source.bin)" = "256"
+          sha256sum source.bin | tee source.sha256
+
+      - name: Freeze conformance field
+        run: |
+          ./pc_v9 freeze source.bin field.tru | tee freeze.log
+          grep -q '^status=PAGE_CONDITIONED_FIELD_FROZEN$' freeze.log
+          grep -q '^prefreeze_exact_replay=PASS$' freeze.log
+          grep -q '^artifact_purpose=CONFORMANCE_ONLY_NOT_COMPRESSION$' freeze.log
+          sha256sum field.tru | tee field.before.sha256
+
+      - name: Delete source
+        run: |
+          rm source.bin
+          test ! -e source.bin
+
+      - name: Reload and exact replay
+        run: |
+          ./pc_v9 replay field.tru recovered.bin | tee replay.log
+          grep -q '^status=PAGE_CONDITIONED_EXACT_REPLAY_PASS$' replay.log
+          grep -q '^recovered_bytes=256$' replay.log
+          grep -q '^query_frames=824$' replay.log
+          grep -q '^positive_responses=256$' replay.log
+          grep -q '^negative_responses=52480$' replay.log
+          grep -q '^nonboolean_responses=0$' replay.log
+          grep -q '^data_nodes_continuously_powered=PASS$' replay.log
+          grep -q '^selector_revisit=PASS$' replay.log
+          grep -q '^final_switch_state=NEITHER$' replay.log
+          test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha256)"
+
+      - name: Prove observation is non-destructive
+        run: |
+          sha256sum field.tru | tee field.after.sha256
+          test "$(awk '{print $1}' field.before.sha256)" = "$(awk '{print $1}' field.after.sha256)"
+          echo "field_imprint_unchanged_by_observation=PASS" | tee immutability.log
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-page-conditioned-v9
+          path: |
+            selftest.log
+            freeze.log
+            replay.log
+            source.sha256
+            field.before.sha256
+            field.after.sha256
+            immutability.log
