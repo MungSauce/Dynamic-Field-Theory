@@ -186,3 +186,25 @@ The capacity-failure test is part of the PASS condition because it demonstrates 
 - EXPERIMENTAL — implemented relation law under evaluation.
 - CAPACITY_EXCEEDED — exact relation rank exceeds fixed machine profile.
 - TRUCOMPRESSION PASS — source-isolated exact replay inside the fixed profile.
+
+
+## 11. Canonical enwik9 measurement
+
+Canonical enwik9 was measured in workflow run **35414901907** after validating its 1,000,000,000-byte size and canonical MD5.
+
+Measured v6 ranks:
+
+```
+rank_bit0=1000
+rank_bit1=1000
+rank_bit2=1000
+rank_bit3=1000
+rank_bit4=1000
+rank_bit5=1000
+rank_bit6=1000
+rank_bit7=1000
+```
+
+Therefore the exact minimum v6 lane count is R=1000 and the minimum frozen artifact is **1,001,000,512 bytes**.
+
+The GF(2) fixed-rank field is consequently **FAILED-LAW for enwik9 compression**. This does not supersede the HMC selector architecture; it falsifies this specific relational factorization as the compression mechanism for canonical enwik9.
