@@ -13,6 +13,7 @@ using namespace trucompute_resistive_v10;
 
 static constexpr size_t CHANNELS=8;
 static constexpr uint32_t POSITIONS=64;
+// Blank and imprinted artifacts must remain structurally identical in size.
 
 static void must(bool x,const char* m){ if(!x) throw std::runtime_error(m); }
 
