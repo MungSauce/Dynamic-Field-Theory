@@ -81,27 +81,74 @@ int qk_strike(qkernel_t *k,uint16_t node,qstrike_t strike){
 
 static qstrike_t invert(qstrike_t s){ return s==Q_STRIKE_POS?Q_STRIKE_NEG:Q_STRIKE_POS; }
 
+static uint16_t queue_count(const qkernel_t *k){
+    return k->qtail>=k->qhead ? (uint16_t)(k->qtail-k->qhead)
+        : (uint16_t)(QOS_MAX_EVENTS-k->qhead+k->qtail);
+}
+
+static int mark_get(const qkernel_t *k,uint16_t node){
+    return (k->pending_mark[node>>3]>>(node&7u))&1u;
+}
+static void mark_set(qkernel_t *k,uint16_t node,int value){
+    uint8_t mask=(uint8_t)(1u<<(node&7u));
+    if(value) k->pending_mark[node>>3]|=mask;
+    else k->pending_mark[node>>3]&=(uint8_t)~mask;
+}
+
+static int propagate(qkernel_t *k,uint16_t node,qstrike_t strike){
+    for(uint16_t i=0;i<k->edge_count;i++){
+        qedge_t *e=&k->edges[i];
+        if(!e->active || e->from!=node || !qk_is_allocated(k,e->to)) continue;
+        qstrike_t out=strike;
+        uint8_t repeats=1;
+        if(e->mode==Q_EDGE_CANCEL) out=invert(out);
+        else if(e->mode==Q_EDGE_DEEPEN) repeats=2;
+        for(uint8_t r=0;r<repeats;r++){
+            if(queue_push(k,(qevent_t){e->to,(int8_t)out})!=0) return -2;
+        }
+    }
+    return 0;
+}
+
 int qk_run(qkernel_t *k,uint32_t event_budget){
-    qevent_t ev;
     uint32_t done=0;
-    while(done<event_budget && queue_pop(k,&ev)==0){
-        done++; k->events_processed++;
-        if(!qk_is_allocated(k,ev.node)) continue;
-        qstate_t before=qk_get(k,ev.node);
-        qstate_t after=q_apply(before,(qstrike_t)ev.strike);
-        if(after==before) continue;
-        qk_set(k,ev.node,after); k->transitions++;
-        for(uint16_t i=0;i<k->edge_count;i++){
-            qedge_t *e=&k->edges[i];
-            if(!e->active || e->from!=ev.node || !qk_is_allocated(k,e->to)) continue;
-            qstrike_t out=(qstrike_t)ev.strike;
-            uint8_t repeats=1;
-            if(e->mode==Q_EDGE_CANCEL) out=invert(out);
-            else if(e->mode==Q_EDGE_DEEPEN) repeats=2;
-            for(uint8_t r=0;r<repeats;r++){
-                if(queue_push(k,(qevent_t){e->to,(int8_t)out})!=0) return -2;
+    while(!queue_empty(k)){
+        uint16_t wave=queue_count(k);
+        if(wave==0) break;
+        if(done+(uint32_t)wave>event_budget) return 1; /* never split a causal wavefront */
+
+        uint16_t touched_count=0;
+        for(uint16_t i=0;i<wave;i++){
+            qevent_t ev;
+            if(queue_pop(k,&ev)!=0) return -3;
+            done++; k->events_processed++;
+            if(!qk_is_allocated(k,ev.node)) continue;
+            if(!mark_get(k,ev.node)){
+                mark_set(k,ev.node,1);
+                k->touched[touched_count++]=ev.node;
+            }
+            k->pending[ev.node]+=(int16_t)ev.strike;
+        }
+        k->wavefronts_processed++;
+
+        /* Only nodes touched by this wave are visited. Opposing strikes have
+           already interfered in pending[]; zero net tension performs no work. */
+        for(uint16_t i=0;i<touched_count;i++){
+            uint16_t node=k->touched[i];
+            int16_t net=k->pending[node];
+            k->pending[node]=0; mark_set(k,node,0);
+            if(net==0 || !qk_is_allocated(k,node)) continue;
+
+            qstrike_t strike=net>0?Q_STRIKE_POS:Q_STRIKE_NEG;
+            uint16_t strength=(uint16_t)(net>0?net:-net);
+            for(uint16_t n=0;n<strength;n++){
+                qstate_t before=qk_get(k,node);
+                qstate_t after=q_apply(before,strike);
+                if(after==before) break; /* saturation consumes remaining same-polarity tension */
+                qk_set(k,node,after); k->transitions++;
+                if(propagate(k,node,strike)!=0) return -2;
             }
         }
     }
-    return queue_empty(k)?0:1;
+    return 0;
 }
