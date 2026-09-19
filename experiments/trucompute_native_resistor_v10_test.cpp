@@ -148,6 +148,19 @@ static int selftest(){
     return 0;
 }
 
+
+static int blank_cmd(const std::string& artifact){
+    Field<CHANNELS> field(POSITIONS);
+    // The machine already exists structurally in its unresolved BOTH condition.
+    save_field(artifact,field,0,0);
+    std::cout<<"status=NATIVE_RESISTOR_BLANK_FIELD_FROZEN\n";
+    std::cout<<"node_count="<<POSITIONS<<"\n";
+    std::cout<<"fixed_imprint_channels="<<CHANNELS<<"\n";
+    std::cout<<"native_unresolved_condition=BOTH\n";
+    std::cout<<"artifact_bytes="<<std::filesystem::file_size(artifact)<<"\n";
+    return 0;
+}
+
 static int freeze_cmd(const std::string& source_path,const std::string& artifact){
     std::ifstream in(source_path,std::ios::binary);
     must(bool(in),"open source");
@@ -219,6 +232,7 @@ static int replay_cmd(const std::string& artifact,const std::string& recovered_p
 int main(int argc,char**argv){
     try{
         if(argc==2 && std::string(argv[1])=="selftest") return selftest();
+        if(argc==3 && std::string(argv[1])=="blank") return blank_cmd(argv[2]);
         if(argc==4 && std::string(argv[1])=="freeze") return freeze_cmd(argv[2],argv[3]);
         if(argc==4 && std::string(argv[1])=="replay") return replay_cmd(argv[2],argv[3]);
         return 64;
