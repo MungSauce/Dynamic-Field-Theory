@@ -1,0 +1,35 @@
+name: TruCompute continuous three-state v10
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_continuous_three_state_v10.hpp'
+      - 'experiments/trucompute_continuous_three_state_v10_test.cpp'
+      - 'docs/TRUCOMPUTE_CONTINUOUS_THREE_STATE_v10.0.md'
+      - '.github/workflows/trucompute-continuous-three-state-v10.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_continuous_three_state_v10_test.cpp -o tc_continuous_v10
+      - name: Run uninterrupted three-state conformance
+        run: |
+          ./tc_continuous_v10 | tee result.log
+          grep -q '^TRUCOMPUTE_CONTINUOUS_THREE_STATE_V10=PASS$' result.log
+          grep -q '^machine_off_state=false$' result.log
+          grep -q '^neither_state=false$' result.log
+          grep -q '^native_domain=NEG_BOTH_POS$' result.log
+          grep -q '^native_substrate=BOTH$' result.log
+          grep -q '^active_resolution=NEG_OR_POS$' result.log
+          grep -q '^selector_transition_requires_reset=false$' result.log
+          grep -q '^selector_transition_passes_through_zero=false$' result.log
+          grep -q '^substrate_mutated_by_observation=false$' result.log
+          grep -q '^selector_revisit=PASS$' result.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-continuous-three-state-v10
+          path: result.log
