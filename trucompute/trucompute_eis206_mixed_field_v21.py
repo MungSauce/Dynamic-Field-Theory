@@ -430,6 +430,7 @@ def probe(source_path: str | Path, prefix: int) -> dict:
 
         result = {
             **sig_meta,
+            "codec_script_bytes": Path(__file__).stat().st_size,
             "source_sha256": sha256(source).hex(),
             "signal_sha256": sha256(signal_raw).hex(),
             "direct_zlib_bytes": len(zlib.compress(source, 9)),
