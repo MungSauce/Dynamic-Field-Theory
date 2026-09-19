@@ -1,0 +1,68 @@
+name: TruCompute fixed keyboard v13
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_fixed_keyboard_v13.hpp'
+      - 'experiments/trucompute_fixed_keyboard_v13_test.cpp'
+      - 'docs/TRUCOMPUTE_FIXED_CHARACTER_BUTTONS_v13.0.md'
+      - '.github/workflows/trucompute-fixed-keyboard-v13.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_fixed_keyboard_v13_test.cpp -o fixedkbd_v13
+
+      - name: Permanent button-bank self-test
+        run: |
+          ./fixedkbd_v13 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_FIXED_KEYBOARD_V13=PASS$' selftest.log
+          grep -q '^physical_character_buttons=206$' selftest.log
+          grep -q '^all_buttons_exist_before_source=true$' selftest.log
+          grep -q '^button_identity_source_tuned=false$' selftest.log
+          grep -q '^button_coupling_source_tuned=false$' selftest.log
+          grep -q '^separate_terminal_map=false$' selftest.log
+
+      - name: Build eight-page native-symbol fixture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          POS=64
+          Path("source.bin").write_bytes(bytes(((p+q*7)%206) for q in range(8) for p in range(POS)))
+          PY
+          test "$(stat -c%s source.bin)" = "512"
+          sha256sum source.bin > source.sha
+
+      - name: Type through permanent keyboard
+        run: |
+          ./fixedkbd_v13 freeze source.bin machine.tru | tee freeze.log
+          grep -q '^status=FIXED_KEYBOARD_MACHINE_FROZEN$' freeze.log
+          grep -q '^physical_character_buttons=206$' freeze.log
+          grep -q '^all_buttons_exist_before_source=true$' freeze.log
+          grep -q '^source_dependent_button_state_bytes=0$' freeze.log
+          grep -q '^separate_terminal_map=false$' freeze.log
+          grep -q '^finished_product=HAND_TUNED_RESISTOR_FIELD$' freeze.log
+
+      - name: Delete source and replay
+        run: |
+          rm source.bin
+          test ! -e source.bin
+          ./fixedkbd_v13 replay machine.tru recovered.bin | tee replay.log
+          grep -q '^status=FIXED_KEYBOARD_EXACT_REPLAY_PASS$' replay.log
+          grep -q '^source_dependent_button_state_bytes=0$' replay.log
+          test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha)"
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-fixed-keyboard-v13
+          path: |
+            selftest.log
+            freeze.log
+            replay.log
+            source.sha
