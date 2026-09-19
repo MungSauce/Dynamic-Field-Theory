@@ -2,7 +2,7 @@ name: TruCompute EIS Word Pixel v24
 on:
   workflow_dispatch:
   push:
-    branches: [trucompute-eis-word-pixel-v24-20260919]
+    branches: [trucompute-eis-word-pixel-v24-fix-20260919]
     paths:
       - "trucompute/trucompute_eis_word_pixel_v24.py"
       - "trucompute/TRUCOMPUTE_EIS_WORD_PIXEL_V24.md"
