@@ -8,6 +8,7 @@ on:
       - 'trucompression/trucompression_native_v3.cpp'
       - 'docs/TRUCOMPUTE_FOUR_CONDITION_STATE_LAW_v2.0.md'
       - 'docs/TRUCOMPRESSION_FORMAL_REPLICATION_PROTOCOL_v1.1.md'
+      - '.github/workflows/trucompression-native-v3.yml'
 
 jobs:
   conformance:
@@ -18,7 +19,6 @@ jobs:
       - name: Build corrected machine
         run: |
           g++ -O3 -std=c++17 trucompression/trucompression_native_v3.cpp -o trucompression_v3
-        shell: bash
 
       - name: Four-condition self-test
         run: ./trucompression_v3 selftest
