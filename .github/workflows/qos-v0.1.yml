@@ -34,11 +34,13 @@ jobs:
           set -euxo pipefail
           mkdir -p build/isodir/boot/grub
           cp build/qos-kernel.elf build/isodir/boot/qos-kernel.elf
+          cp build/boot.qbin build/isodir/boot/boot.qbin
           cat > build/isodir/boot/grub/grub.cfg <<'CFG'
           set timeout=0
           set default=0
           menuentry "Q-OS v0.1" {
               multiboot2 /boot/qos-kernel.elf
+              module2 /boot/boot.qbin qbin
               boot
           }
           CFG
@@ -48,12 +50,18 @@ jobs:
         working-directory: qos
         run: |
           set +e
-          timeout 20s qemu-system-i386             -cdrom build/qos-v0.1.iso             -display none             -serial file:build/qemu-serial.log             -no-reboot             -device isa-debug-exit,iobase=0xf4,iosize=0x04
+          timeout 20s qemu-system-i386 \
+            -cdrom build/qos-v0.1.iso \
+            -display none \
+            -serial file:build/qemu-serial.log \
+            -no-reboot \
+            -device isa-debug-exit,iobase=0xf4,iosize=0x04
           rc=$?
           set -e
           cat build/qemu-serial.log
           test "$rc" -eq 33
           grep -q '^QOS_BOOT_CONFORMANCE=PASS$' build/qemu-serial.log
+          grep -q '^QBIN_MODULE=PASS bytes=' build/qemu-serial.log
           grep -q '^QBIN_EXEC=PASS$' build/qemu-serial.log
           grep -q '^SPARSE_EXECUTION=PASS$' build/qemu-serial.log
           grep -q '^NULL_TOPOLOGY=PASS$' build/qemu-serial.log
