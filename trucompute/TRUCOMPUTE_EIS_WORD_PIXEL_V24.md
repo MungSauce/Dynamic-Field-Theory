@@ -104,3 +104,7 @@ The physics itself is not claimed to violate information bounds. Compression exi
 ```
 trucompute/trucompute_eis_word_pixel_v24.py
 ```
+
+## Verification gate
+
+Canonical 64 KiB enwik9 cold replay is required in both stream and buffered snapshot modes before promotion.
