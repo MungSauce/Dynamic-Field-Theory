@@ -40,7 +40,7 @@ void kernel_main(uint32_t multiboot_magic,uint32_t multiboot_info){
     if(!qbin){ serial_puts("QBIN_MODULE=FAIL\n"); platform_exit(3); }
     serial_puts("QBIN_MODULE=PASS bytes="); serial_u32((uint32_t)qbin_len); serial_putc('\n');
 
-    qkernel_t kernel; qk_init(&kernel);
+    qk_init(&kernel);
     qbin_result_t result;
     int rc=qbin_execute(&kernel,qbin,qbin_len,&result);
     if(rc!=0){
