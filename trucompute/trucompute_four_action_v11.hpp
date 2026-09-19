@@ -42,16 +42,18 @@ struct Probe {
 };
 
 class PageActivator {
-    uint16_t page_;
+    uint16_t page_=0;
 public:
+    constexpr PageActivator() = default;
     explicit constexpr PageActivator(uint16_t p):page_(p){}
     constexpr bool selected(const Probe& p) const { return p.page == page_; }
     constexpr uint16_t page() const { return page_; }
 };
 
 class CharacterActivator {
-    uint16_t character_;
+    uint16_t character_=0;
 public:
+    constexpr CharacterActivator() = default;
     explicit constexpr CharacterActivator(uint16_t c):character_(c){}
     constexpr bool selected(const Probe& p) const { return p.character == character_; }
     constexpr uint16_t character() const { return character_; }
@@ -113,24 +115,13 @@ class Field {
     std::array<CharacterActivator,CHARACTER_COUNT> characters_;
 
     static std::array<PageActivator,MAX_PAGES> make_pages() {
-        std::array<PageActivator,MAX_PAGES> a = []{
-            std::array<PageActivator,MAX_PAGES> tmp{
-                PageActivator(0)
-            };
-            return tmp;
-        }();
-        // std::array cannot default-construct this type portably; overwrite via placement-like assignment
+        std::array<PageActivator,MAX_PAGES> a{};
         for(uint16_t i=0;i<MAX_PAGES;++i) a[i]=PageActivator(i);
         return a;
     }
 
     static std::array<CharacterActivator,CHARACTER_COUNT> make_chars() {
-        std::array<CharacterActivator,CHARACTER_COUNT> a = []{
-            std::array<CharacterActivator,CHARACTER_COUNT> tmp{
-                CharacterActivator(0)
-            };
-            return tmp;
-        }();
+        std::array<CharacterActivator,CHARACTER_COUNT> a{};
         for(uint16_t i=0;i<CHARACTER_COUNT;++i) a[i]=CharacterActivator(i);
         return a;
     }
