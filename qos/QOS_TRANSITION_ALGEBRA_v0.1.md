@@ -55,12 +55,18 @@ If a strike leaves a node unchanged, there is no delta and no outgoing propagati
 
 Therefore the Q-kernel does not poll inactive nodes. Work exists only as queued deltas.
 
+Events at the same causal depth form one **wavefront**. The kernel combines all strikes that reach a node in that wavefront before resolving the node:
+
+`net_tension(node) = positive_strikes - negative_strikes`
+
+Equal opposing strikes cancel without touching the node. A nonzero net is then applied at its signed strength. This makes wave interference independent of arbitrary queue order. Newly produced deltas form the next causal wavefront. A wavefront is a dependency boundary, not a global clock tick.
+
 ## Topology operators
 
 Q-OS v0.1 defines three edge interactions and one structural operation:
 
 - `CASCADE`: transmit the same strike once.
-- `DEEPEN`: transmit the same strike twice.
+- `DEEPEN`: transmit the same strike twice into the next causal wavefront, increasing net tension by two.
 - `CANCEL`: transmit the opposite strike once.
 - `SEVER`: remove an edge or deallocate a node; a severed node becomes `Null`.
 
