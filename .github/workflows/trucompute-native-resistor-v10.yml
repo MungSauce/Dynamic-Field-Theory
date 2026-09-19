@@ -101,7 +101,7 @@ jobs:
           PY
           set +e
           ./resistor_v10 freeze source9_fail.bin should_not_exist.tru | tee capacity.log
-          rc=\${PIPESTATUS[0]}
+          rc=${PIPESTATUS[0]}
           set -e
           test "$rc" = "2"
           grep -q '^status=CAPACITY_EXCEEDED' capacity.log
