@@ -188,10 +188,10 @@ def decomp(b,i):
 
 def hdr(sl,ec,uc,dr,db,fr,fb,backend,h):
     b=bytearray(HEADER_BYTES)
-    struct.pack_into("<8sHHBBBBIIQQQQQQ",b,0,MAGIC,VERSION,HEADER_BYTES,BACKENDS[backend],MAX_ORDER,3,0,WIDTH,HEIGHT,sl,ec,uc,dr,db,fr,fb)
+    struct.pack_into("<8sHHBBBBIIQQQQQQQ",b,0,MAGIC,VERSION,HEADER_BYTES,BACKENDS[backend],MAX_ORDER,3,0,WIDTH,HEIGHT,sl,ec,uc,dr,db,fr,fb)
     b[80:112]=h;struct.pack_into("<I",b,156,zlib.crc32(b[:156])&0xffffffff);return bytes(b)
 def ph(b):
-    v=struct.unpack_from("<8sHHBBBBIIQQQQQQ",b,0)
+    v=struct.unpack_from("<8sHHBBBBIIQQQQQQQ",b,0)
     magic,ver,hb,bid,mo,digits,_r,w,ht,sl,ec,uc,dr,db,fr,fb=v
     if magic!=MAGIC or ver!=VERSION or hb!=HEADER_BYTES or bid not in BACKEND_NAMES or mo!=2 or digits!=3 or w!=WIDTH or ht!=HEIGHT:raise ValueError("bad header")
     if zlib.crc32(b[:156])&0xffffffff!=struct.unpack_from("<I",b,156)[0]:raise ValueError("CRC")
