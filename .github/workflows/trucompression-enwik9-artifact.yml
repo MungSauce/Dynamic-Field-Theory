@@ -1,0 +1,68 @@
+name: TruCompression enwik9 frozen-artifact measurement
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'experiments/trucompression_enwik9_artifact_roundtrip.cpp'
+      - '.github/workflows/trucompression-enwik9-artifact.yml'
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build freezer and source-isolated replay
+        run: g++ -O3 -march=native -std=c++17 experiments/trucompression_enwik9_artifact_roundtrip.cpp -o tc_roundtrip
+
+      - name: Download canonical enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          test "$(md5sum enwik9 | awk '{print $1}')" = "e206c3450ac99950df65bf70ef61a12d"
+
+      - name: Freeze actual TruCompression machine artifact
+        run: |
+          ./tc_roundtrip freeze enwik9 enwik9.truc | tee freeze.log
+          stat -c 'measured_artifact_bytes=%s' enwik9.truc | tee artifact_size.log
+          sha256sum enwik9.truc | tee artifact.sha256
+          test "$(stat -c%s enwik9.truc)" = "1001000512"
+
+      - name: Remove original source completely
+        run: |
+          rm -f enwik9 enwik9.zip
+          test ! -e enwik9
+          test ! -e enwik9.zip
+
+      - name: Reconstruct using frozen artifact only
+        run: |
+          ./tc_roundtrip replay enwik9.truc enwik9.recovered | tee replay.log
+          test "$(stat -c%s enwik9.recovered)" = "1000000000"
+          test "$(md5sum enwik9.recovered | awk '{print $1}')" = "e206c3450ac99950df65bf70ef61a12d"
+          echo "recovered_md5=$(md5sum enwik9.recovered | awk '{print $1}')" | tee result.log
+          echo "source_bytes=1000000000" | tee -a result.log
+          echo "artifact_bytes=$(stat -c%s enwik9.truc)" | tee -a result.log
+          python3 - <<'PY' | tee -a result.log
+          source=1_000_000_000
+          artifact=1_001_000_512
+          print(f"artifact_over_source={artifact/source:.9f}")
+          print(f"source_over_artifact={source/artifact:.9f}")
+          print(f"size_change_bytes={artifact-source}")
+          print(f"size_change_percent={(artifact/source-1)*100:.7f}")
+          PY
+          grep -q '^status=SOURCE_ISOLATED_REPLAY_PASS$' replay.log
+
+      - name: Preserve compact evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-enwik9-frozen-artifact-measurement
+          path: |
+            freeze.log
+            artifact_size.log
+            artifact.sha256
+            replay.log
+            result.log
