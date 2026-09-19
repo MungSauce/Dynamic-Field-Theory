@@ -1,0 +1,101 @@
+name: TruCompression v6 canonical conformance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_runtime_v3.hpp'
+      - 'trucompression/trucompression_hmc_v6.cpp'
+      - 'docs/TRUCOMPRESSION_CANONICAL_ARCHITECTURE_v2.0.md'
+      - '.github/workflows/trucompression-v6-canonical.yml'
+
+jobs:
+  canonical:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: g++ -O3 -std=c++17 trucompression/trucompression_hmc_v6.cpp -o trucompression_v6
+
+      - name: TruCompute and HMC conformance
+        run: |
+          ./trucompression_v6 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_V3_CONFORMANCE=PASS$' selftest.log
+          grep -q '^TRUCOMPRESSION_HMC_V6=PASS$' selftest.log
+          grep -q '^control_buttons=1206$' selftest.log
+          grep -q '^node_to_node_relations=0$' selftest.log
+          grep -q '^power_cycles_per_task=1$' selftest.log
+
+      - name: Fixed blank geometry
+        run: |
+          ./trucompression_v6 blank blank_r2.truc 2 | tee blank.log
+          test "$(stat -c%s blank_r2.truc)" = "2002512"
+          grep -q '^relation_lanes=2$' blank.log
+          grep -q '^artifact_bytes=2002512$' blank.log
+
+      - name: Generate exact-fit and over-rank corpora
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          Path("one_page.bin").write_bytes((b"AB"*10000))
+
+          n=1_010_000
+          Path("cross_page.bin").write_bytes((b"AB"*((n+1)//2))[:n])
+
+          N=1_000_000
+          x=bytearray(b"A"*(3*N))
+          x[0]=ord("B")
+          x[N+1]=ord("B")
+          x[2*N+2]=ord("B")
+          Path("rank3.bin").write_bytes(x)
+          PY
+
+      - name: Strict HMC one-page replay
+        run: |
+          sha256sum one_page.bin > one.sha
+          ./trucompression_v6 imprint one_page.bin one.truc 2 | tee one_imprint.log
+          test "$(stat -c%s one.truc)" = "2002512"
+          rm one_page.bin
+          ./trucompression_v6 replay one.truc one.out --strict-hmc | tee one_replay.log
+          test "$(sha256sum one.out | awk '{print $1}')" = "$(awk '{print $1}' one.sha)"
+          grep -q '^power_cycles=1$' one_replay.log
+
+      - name: Cross-page exact replay
+        run: |
+          sha256sum cross_page.bin > cross.sha
+          ./trucompression_v6 imprint cross_page.bin cross.truc 2 | tee cross_imprint.log
+          test "$(stat -c%s cross.truc)" = "2002512"
+          rm cross_page.bin
+          ./trucompression_v6 replay cross.truc cross.out | tee cross_replay.log
+          test "$(sha256sum cross.out | awk '{print $1}')" = "$(awk '{print $1}' cross.sha)"
+          grep -q '^page_button=0 ' cross_replay.log
+          grep -q '^page_button=1 ' cross_replay.log
+          grep -q '^run_lifecycle=BEGIN_ONCE__SELECTORS_CHANGE__DONE_ONCE$' cross_replay.log
+
+      - name: Fixed capacity must fail without growth
+        run: |
+          set +e
+          ./trucompression_v6 imprint rank3.bin should_not_exist.truc 2 | tee capacity.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test "$rc" = "2"
+          grep -q '^status=CAPACITY_EXCEEDED$' capacity.log
+          grep -q '^required_rank_at_least=3$' capacity.log
+          grep -q '^fixed_relation_lanes=2$' capacity.log
+          grep -q '^machine_growth=0$' capacity.log
+          test ! -e should_not_exist.truc
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-v6-canonical-results
+          path: |
+            selftest.log
+            blank.log
+            one_imprint.log
+            one_replay.log
+            cross_imprint.log
+            cross_replay.log
+            capacity.log

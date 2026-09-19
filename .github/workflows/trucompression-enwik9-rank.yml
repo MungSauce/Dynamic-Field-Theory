@@ -1,0 +1,38 @@
+name: TruCompression enwik9 rank measurement
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'experiments/trucompression_enwik9_rank_probe.cpp'
+      - '.github/workflows/trucompression-enwik9-rank.yml'
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact rank probe
+        run: g++ -O3 -march=native -std=c++17 experiments/trucompression_enwik9_rank_probe.cpp -o enwik9_rank_probe
+
+      - name: Download canonical enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          test "$(md5sum enwik9 | awk '{print $1}')" = "e206c3450ac99950df65bf70ef61a12d"
+
+      - name: Measure exact v6 relation rank
+        run: |
+          ./enwik9_rank_probe enwik9 | tee enwik9_rank.txt
+          grep -q '^terminal_count=206$' enwik9_rank.txt
+          grep -q '^status=RANK_MEASURED$' enwik9_rank.txt
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-enwik9-rank
+          path: enwik9_rank.txt
