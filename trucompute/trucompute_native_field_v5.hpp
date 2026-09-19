@@ -16,8 +16,10 @@ enum class Observation : uint8_t {
 
 struct Selector {
     uint16_t page = 0;
+    uint32_t position = 0;
     uint16_t character = 0;
     bool page_active = false;
+    bool position_active = false;
     bool character_active = false;
 };
 
