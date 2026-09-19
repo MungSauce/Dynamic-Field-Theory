@@ -1,0 +1,45 @@
+name: TruCompute EIS Word Pixel v24
+on:
+  workflow_dispatch:
+  push:
+    branches: [trucompute-eis-word-pixel-v24-20260919]
+    paths:
+      - "trucompute/trucompute_eis_word_pixel_v24.py"
+      - "trucompute/TRUCOMPUTE_EIS_WORD_PIXEL_V24.md"
+      - ".github/workflows/trucompute-eis-word-pixel-v24.yml"
+jobs:
+  canonical:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch canonical enwik9
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 https://mattmahoney.net/dc/enwik9.zip -o enwik9.zip
+          python - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("enwik9.zip") as z:
+              with z.open("enwik9") as s, open("enwik9_64k","wb") as d:d.write(s.read(65536))
+          PY
+      - name: Probe
+        run: python trucompute/truqcompute_eis_word_pixel_v24.py probe enwik9_64k --prefix 65536 | tee WORD_PIXEL_V24.json
+      - name: Cold dual-reader replay
+        run: |
+          python trucompute/truqcompute_eis_word_pixel_v24.py encode enwik9_64k enwik9_64k.tcewp24 --backend lzma | tee WORD_PIXEL_V24_ENCODE.json
+          mv enwik9_64k original
+          python trucompute/truqcompute_eis_word_pixel_v24.py decode enwik9_64k.tcewp24 stream --mode stream | tee WORD_PIXEL_V24_STREAM.json
+          python trucompute/truqcompute_eis_word_pixel_v24.py decode enwik9_64k.tcewp24 buffer --mode buffer | tee WORD_PIXEL_V24_BUFFER.json
+          cmp original stream
+          cmp original buffer
+          sha256sum original stream buffer
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trucompute-eis-word-pixel-v24
+          path: |
+            WORD_PIXEL_V24.json
+            WORD_PIXEL_V24_ENCODE.json
+            WORD_PIXEL_V24_STREAM.json
+            WORD_PIXEL_V24_BUFFER.json
+            enwik9_64k.tcewp24
