@@ -1,0 +1,21 @@
+name: TruCompute Contextual Zero v17
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - trucompute-contextual-zero-v17-20260918
+    paths:
+      - "trucompute/trucompute_contextual_zero_v17.cpp"
+      - "trucompute/TRUCOMPUTE_CONTEXTUAL_ZERO_V17.md"
+      - ".github/workflows/trupute-contextual-zero-v17.yml"
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O2 -std=c++17 -Wall -Wextra -pedantic trucompute/truqcompute_contextual_zero_v17.cpp -o /tmp/trucompute_contextual_zero_v17
+      - name: Run
+        run: /tmp/trupute_contextual_zero_v17
