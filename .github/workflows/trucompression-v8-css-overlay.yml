@@ -1,0 +1,83 @@
+name: TruCompression v8 CSS overlay enwik9 measurement
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompression/trucompression_css_overlay_v8.cpp'
+      - '.github/workflows/trucompression-v8-css-overlay.yml'
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build CSS-on-TruCompute candidate
+        run: g++ -O3 -std=c++17 trucompression/trucompression_css_overlay_v8.cpp -o css_overlay_v8
+
+      - name: TruCompute/CSS conformance
+        run: |
+          ./css_overlay_v8 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_V3_CONFORMANCE=PASS$' selftest.log
+          grep -q '^CSS_OVERLAY_MACHINE=PASS$' selftest.log
+          grep -q '^page_mode=CSS_TINT_FILTER$' selftest.log
+          grep -q '^character_mode=HMC_TRUE_FALSE$' selftest.log
+          grep -q '^persistent_page_banks=0$' selftest.log
+          grep -q '^persistent_character_tables=0$' selftest.log
+
+      - name: Download canonical enwik9
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          unzip -q enwik9.zip
+          test "$(stat -c%s enwik9)" = "1000000000"
+          test "$(md5sum enwik9 | awk '{print $1}')" = "e206c3450ac99950df65bf70ef61a12d"
+          test "$(sha256sum enwik9 | awk '{print $1}')" = "159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc"
+
+      - name: Imprint entire corpus into one CSS machine
+        run: |
+          set +e
+          ./css_overlay_v8 train enwik9 enwik9.css 1000000000 | tee imprint.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "imprint_exit_code=$rc" | tee result.log
+          if grep -q '^status=FROZEN' imprint.log; then
+            echo "freeze_status=FROZEN" | tee -a result.log
+            stat -c 'artifact_bytes=%s' enwik9.css | tee -a result.log
+            sha256sum enwik9.css | tee artifact.sha256
+          elif grep -q '^status=RELATIONAL_CONTRADICTION' imprint.log; then
+            echo "freeze_status=RELATIONAL_CONTRADICTION" | tee -a result.log
+            grep '^status=RELATIONAL_CONTRADICTION' imprint.log | tee -a result.log
+            test ! -e enwik9.css
+          else
+            echo "freeze_status=UNEXPECTED_FAILURE" | tee -a result.log
+            exit 1
+          fi
+
+      - name: Source-isolated replay if and only if frozen
+        run: |
+          if grep -q '^status=FROZEN' imprint.log; then
+            sha256sum enwik9 > source.sha
+            rm -f enwik9 enwik9.zip
+            test ! -e enwik9
+            test ! -e enwik9.zip
+            ./css_overlay_v8 replay enwik9.css recovered.bin | tee replay.log
+            test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha)"
+            test "$(stat -c%s recovered.bin)" = "1000000000"
+            echo "source_isolated_replay=PASS" | tee -a result.log
+          else
+            echo "source_isolated_replay=NOT_REACHED" | tee replay.log
+          fi
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-v8-css-overlay-enwik9
+          path: |
+            selftest.log
+            imprint.log
+            result.log
+            replay.log
+            artifact.sha256
