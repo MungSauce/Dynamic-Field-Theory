@@ -413,9 +413,8 @@ def unpack_artifact(artifact_path: str | Path, signal_out: str | Path, source_ou
 
 
 def probe(source_path: str | Path, prefix: int) -> dict:
-    source = Path(source_path).read_bytes()
-    if prefix > 0:
-        source = source[:prefix]
+    with open(source_path, "rb") as f:
+        source = f.read(prefix) if prefix > 0 else f.read()
     if not source:
         raise ValueError("empty source")
     with tempfile.TemporaryDirectory() as td_s:
