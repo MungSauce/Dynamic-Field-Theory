@@ -1,0 +1,98 @@
+name: TruCompute character-stream imprinter v11
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_streaming_imprinter_v11.hpp'
+      - 'experiments/trucompute_streaming_imprinter_v11_test.cpp'
+      - 'docs/TRUCOMPUTE_CHARACTER_STREAM_IMPRINTER_v11.0.md'
+      - '.github/workflows/trucompute-streaming-imprinter-v11.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_streaming_imprinter_v11_test.cpp -o stream_v11
+
+      - name: Parser self-test
+        run: |
+          ./stream_v11 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_STREAMING_IMPRINTER_V11=PASS$' selftest.log
+          grep -q '^parser_mode=CHARACTER_BY_CHARACTER$' selftest.log
+          grep -q '^parser_stores_page_buffer=false$' selftest.log
+          grep -q '^parser_stores_source_copy=false$' selftest.log
+          grep -q '^node_page_records=false$' selftest.log
+          grep -q '^node_character_records=false$' selftest.log
+
+      - name: Build eight-page stream fixture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          POS=64
+          out=[]
+          alphabet=b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+          for q in range(8):
+              for pos in range(POS):
+                  out.append(alphabet[(pos+q)%len(alphabet)])
+          Path("source.bin").write_bytes(bytes(out))
+          PY
+          test "$(stat -c%s source.bin)" = "512"
+          sha256sum source.bin > source.sha
+
+      - name: Stream source directly into field
+        run: |
+          ./stream_v11 freeze source.bin field.tru | tee freeze.log
+          grep -q '^status=STREAMING_FIELD_FROZEN$' freeze.log
+          grep -q '^parser_mode=CHARACTER_BY_CHARACTER$' freeze.log
+          grep -q '^page_buffer_bytes=0$' freeze.log
+          grep -q '^source_copy_bytes_during_imprint=0$' freeze.log
+          grep -q '^page_response_table=false$' freeze.log
+          grep -q '^character_response_table=false$' freeze.log
+          grep -q '^residual_bytes=0$' freeze.log
+
+      - name: Delete source and cold replay
+        run: |
+          rm source.bin
+          test ! -e source.bin
+          ./stream_v11 replay field.tru recovered.bin | tee replay.log
+          grep -q '^status=STREAMING_EXACT_REPLAY_PASS$' replay.log
+          test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha)"
+
+      - name: Prove bounded ninth page failure
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          POS=64
+          alphabet=b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+          out=[]
+          for q in range(9):
+              for pos in range(POS):
+                  x=alphabet[(pos+q)%len(alphabet)]
+                  if q==8 and pos==0:
+                      x=alphabet[(alphabet.index(x)+1)%len(alphabet)]
+                  out.append(x)
+          Path("source9.bin").write_bytes(bytes(out))
+          PY
+          set +e
+          ./stream_v11 freeze source9.bin should_not_exist.tru > capacity.log 2>&1
+          rc=$?
+          set -e
+          test "$rc" = "2"
+          grep -q '^status=CAPACITY_EXCEEDED' capacity.log
+          grep -q 'artifact_created=false' capacity.log
+          test ! -e should_not_exist.tru
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-streaming-imprinter-v11
+          path: |
+            selftest.log
+            freeze.log
+            replay.log
+            capacity.log
+            source.sha
