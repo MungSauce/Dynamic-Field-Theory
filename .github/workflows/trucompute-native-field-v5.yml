@@ -1,0 +1,28 @@
+name: TruCompute native field nodes v5
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_native_field_v5.hpp'
+      - 'experiments/trucompute_native_field_v5_test.cpp'
+      - 'docs/TRUCOMPUTE_NATIVE_FIELD_NODES_v5.0.md'
+      - '.github/workflows/trucompute-native-field-v5.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_native_field_v5_test.cpp -o native_field_v5
+      - name: Run
+        run: |
+          ./native_field_v5 | tee native_field.log
+          grep -q '^TRUCOMPUTE_NATIVE_FIELD_V5=PASS$' native_field.log
+          grep -q '^field_is_composed_of_native_nodes=true$' native_field.log
+          grep -q '^generic_identity_only_nodes=false$' native_field.log
+          grep -q '^node_type_defines_participation_law=true$' native_field.log
+          grep -q '^selector_filters_existing_nodes=true$' native_field.log
+          grep -q '^selector_does_not_mutate_nodes=true$' native_field.log
+          grep -q '^balanced_is_native_coexistence=true$' native_field.log
