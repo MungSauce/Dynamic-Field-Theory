@@ -31,9 +31,26 @@ int main(void){
     CHECK(qk_get(&k,1)==Q_PRIMED_ZERO);
     CHECK(qk_get(&k,2)==Q_DECAY_ZERO);
     CHECK(k.transitions==3);
+    CHECK(k.wavefronts_processed==3);
     CHECK(qk_sever_node(&k,1)==0);
     CHECK(!qk_is_allocated(&k,1));
     CHECK(qk_strike(&k,1,Q_STRIKE_POS)!=0);
+
+    CHECK(qk_alloc(&k,3,Q_PRIMED_ZERO)==0);
+    uint32_t before_cancel=k.transitions;
+    CHECK(qk_strike(&k,3,Q_STRIKE_POS)==0);
+    CHECK(qk_strike(&k,3,Q_STRIKE_NEG)==0);
+    CHECK(qk_run(&k,100)==0);
+    CHECK(qk_get(&k,3)==Q_PRIMED_ZERO);
+    CHECK(k.transitions==before_cancel);
+
+    CHECK(qk_alloc(&k,4,Q_NEG)==0);
+    CHECK(qk_alloc(&k,5,Q_NEG)==0);
+    CHECK(qk_link(&k,4,5,Q_EDGE_DEEPEN)==0);
+    CHECK(qk_strike(&k,4,Q_STRIKE_POS)==0);
+    CHECK(qk_run(&k,100)==0);
+    CHECK(qk_get(&k,4)==Q_PRIMED_ZERO);
+    CHECK(qk_get(&k,5)==Q_POS);
     puts("QOS_QKERNEL_CONFORMANCE=PASS");
     printf("transitions=%u events=%u\n",k.transitions,k.events_processed);
     return 0;
