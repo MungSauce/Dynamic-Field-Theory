@@ -2,6 +2,10 @@ name: TruCompression enwik9 rank measurement
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'experiments/trucompression_enwik9_rank_probe.cpp'
+      - '.github/workflows/trucompression-enwik9-rank.yml'
 
 jobs:
   measure:
