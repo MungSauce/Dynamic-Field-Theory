@@ -1,0 +1,103 @@
+name: TruCompression v5 HMC selector test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_runtime_v3.hpp'
+      - 'trucompression/trucompression_hmc_v5.cpp'
+      - '.github/workflows/trucompression-hmc-v5.yml'
+
+jobs:
+  hmc-selector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build HMC selector machine
+        run: g++ -O3 -std=c++17 trucompression/trucompression_hmc_v5.cpp -o trucompression_hmc_v5
+
+      - name: HMC boundary and TruCompute conformance
+        run: ./trucompression_hmc_v5 selftest
+
+      - name: Blank machine
+        run: |
+          ./trucompression_hmc_v5 blank blank.truc | tee blank.log
+          test "$(stat -c%s blank.truc)" = "125064"
+          grep -q '^control_buttons=1206$' blank.log
+          grep -q '^page_buttons=1000$' blank.log
+          grep -q '^character_buttons=206$' blank.log
+
+      - name: One-page HMC mechanics test
+        run: |
+          ./trucompression_hmc_v5 synth 20000 compatible20k.bin
+          sha256sum compatible20k.bin > compatible20k.sha256
+          ./trucompression_hmc_v5 imprint compatible20k.bin compatible20k.truc | tee strict_imprint.log
+          rm compatible20k.bin
+          ./trucompression_hmc_v5 replay compatible20k.truc compatible20k.out --strict-buttons | tee strict_replay.log
+          REC=$(sha256sum compatible20k.out | awk '{print $1}')
+          SRC=$(awk '{print $1}' compatible20k.sha256)
+          test "$REC" = "$SRC"
+          grep -q '^control_buttons=1206$' strict_replay.log
+
+      - name: Cross-page HMC mechanics test
+        run: |
+          ./trucompression_hmc_v5 synth 1010000 compatible_cross_page.bin
+          sha256sum compatible_cross_page.bin > cross.sha256
+          ./trucompression_hmc_v5 imprint compatible_cross_page.bin cross.truc | tee cross_imprint.log
+          test "$(stat -c%s cross.truc)" = "125064"
+          rm compatible_cross_page.bin
+          ./trucompression_hmc_v5 replay cross.truc cross.out | tee cross_replay.log
+          REC=$(sha256sum cross.out | awk '{print $1}')
+          SRC=$(awk '{print $1}' cross.sha256)
+          test "$REC" = "$SRC"
+          grep -q '^page_button=0 ' cross_replay.log
+          grep -q '^page_button=1 ' cross_replay.log
+
+      - name: Ordinary corpus probes
+        run: |
+          python3 - <<'PY'
+          import random
+          from pathlib import Path
+          n=200_000
+          Path("repeat_A.bin").write_bytes(b"A"*n)
+          phrase=b"the quick brown fox jumps over the lazy dog. "
+          Path("repeated_text.bin").write_bytes((phrase*((n+len(phrase)-1)//len(phrase)))[:n])
+          r=random.Random(12345)
+          Path("random206.bin").write_bytes(bytes(r.randrange(206) for _ in range(n)))
+          PY
+
+      - name: Measure minimum-width HMC transfer failures
+        run: |
+          : > hmc_summary.txt
+          for src in repeat_A.bin repeated_text.bin random206.bin; do
+            art="${src%.bin}.truc"
+            log="${src%.bin}.log"
+            set +e
+            ./trucompression_hmc_v5 imprint "$src" "$art" > "$log"
+            rc=$?
+            set -e
+            echo "=== $src rc=$rc ===" | tee -a hmc_summary.txt
+            cat "$log" | tee -a hmc_summary.txt
+            if [ "$rc" = "0" ]; then
+              test "$(stat -c%s "$art")" = "125064"
+            else
+              test "$rc" = "2"
+              grep -q '^status=IMPRINT_CONTRADICTION$' "$log"
+              grep -q '^node_to_node_relations=0$' "$log"
+              grep -q '^machine_growth=0$' "$log"
+              test ! -e "$art"
+            fi
+          done
+
+      - name: Preserve evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-v5-hmc-results
+          path: |
+            blank.log
+            strict_imprint.log
+            strict_replay.log
+            cross_imprint.log
+            cross_replay.log
+            hmc_summary.txt
