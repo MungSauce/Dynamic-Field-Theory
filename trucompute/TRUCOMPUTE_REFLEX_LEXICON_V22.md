@@ -271,3 +271,97 @@ The stored delay is not claimed to evade information theory. It is the remaining
 ```
 trucompute/trucompute_reflex_lexicon_v22.py
 ```
+
+
+## Canonical enwik9 64 KiB result
+
+GitHub Actions run: `35428137920`
+
+The canonical enwik9 prefix probe and cold replay completed successfully.
+
+```
+source bytes:                         65,536
+button presses:                       15,331
+unique buttons:                        3,469
+fixed global ID width:                    12 bits/press
+fixed-ID sequence equivalent:         22,996.5 bytes
+
+dictionary raw:                       40,618 bytes
+dictionary LZMA:                      18,200 bytes
+
+raw reflex events:                    20,444 bytes
+reflex events LZMA:                   13,444 bytes
+empirical reflex entropy:              6.755 bits/press
+empirical entropy equivalent:         12,945 bytes
+
+complete v22 LZMA artifact:           31,772 bytes
+artifact/source ratio:                 48.480%
+
+direct zlib:                          24,577 bytes
+direct LZMA:                          22,604 bytes
+```
+
+Reflex resolution statistics:
+
+```
+rank-0 TRUE presses:                   8,023
+rank-0 fraction:                      52.332%
+first-use/global fallbacks:            3,469
+fallback fraction:                    22.627%
+
+order-0 resolutions:                   3,536
+order-1 resolutions:                   3,202
+order-2 resolutions:                   5,124
+```
+
+The fallback count again exactly equals the number of unique buttons. Every unique button therefore pays one first-use/static selection; subsequent appearances are eligible for contextual reflex resolution.
+
+The measured sequence result is significant but is not yet a complete compression win:
+
+```
+fixed button space:    12.000 bits/press
+measured reflex event:  6.755 bits/press
+```
+
+This is about a 43.7% reduction in empirical sequence entropy relative to fixed-width global button selection.
+
+The complete artifact still loses to direct LZMA on this 64 KiB prefix because the full lexicon costs 18,200 bytes at this small scale.
+
+Cold replay:
+
+```
+decoded bytes: 65,536
+source SHA-256:
+05fc5f44993ef0557959db76bf47e45badb2dd9c69d93ce08911935b5e52bf40
+
+recovered SHA-256:
+05fc5f44993ef0557959db76bf47e45badb2dd9c69d93ce08911935b5e52bf40
+
+exact: PASS
+```
+
+## Random-button control
+
+A 64 KiB synthetic control built from 1,024 randomly selected word buttons plus deterministic spaces also passed exact reconstruction.
+
+```
+complete v22 LZMA artifact: 19,584 bytes
+direct LZMA:                15,568 bytes
+rank-0 fraction:            50.108%
+empirical event entropy:     6.410 bits/press
+```
+
+This control intentionally contains predictable alternating separator buttons, so it is not a uniformly random token process. It confirms exact operation and shows that merely converting values into buttons/ranks does not beat direct compression.
+
+## Current conclusion
+
+v22 validates the mathematical mechanism:
+
+1. a complete lexicon can be represented as reusable buttons;
+2. FALSE candidates do not need separate retained bits;
+3. the TRUE button can be represented by deterministic contextual delay/rank;
+4. encoder and decoder independently rebuild the same reflex ordering from prior presses;
+5. exact source recovery succeeds;
+6. on real enwik9 text the delay distribution is substantially narrower than the global button space.
+
+The remaining problem is no longer whether the button/reflex representation works. It is whether stronger TruCompute programs can establish contexts/categories/relations that make the remaining TRUE delays small enough to amortize the retained lexicon and outperform mature compressors.
