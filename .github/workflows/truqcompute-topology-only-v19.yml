@@ -1,0 +1,18 @@
+name: TruCompute Topology Only v19
+on:
+  workflow_dispatch:
+  push:
+    branches: [trucompute-topology-only-probe-v19-20260918]
+    paths:
+      - "trucompute/truqcompute_topology_only_probe_v19.cpp"
+      - "trucompute/TRUCOMPUTE_TOPOLOGY_ONLY_PROBE_V19.md"
+      - ".github/workflows/truqcompute-topology-only-v19.yml"
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O2 -std=c++17 -Wall -Wextra -pedantic trucompute/truqcompute_topology_only_probe_v19.cpp -o /tmp/tc19
+      - name: Run
+        run: /tmp/tc19
