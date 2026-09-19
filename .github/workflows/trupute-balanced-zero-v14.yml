@@ -1,0 +1,24 @@
+name: TruCompute Balanced Zero v14
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - trucompute-balanced-zero-v14-20260918
+    paths:
+      - "trucompute/trucompute_balanced_runtime_v14.hpp"
+      - "trucompute/trucompute_balanced_environment_v14.cpp"
+      - ".github/workflows/trupute-balanced-zero-v14.yml"
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build balanced-zero environment
+        run: |
+          g++ -O2 -std=c++17 -Wall -Wextra -pedantic             trucompute/trucompute_balanced_environment_v14.cpp             -o trucompute_balanced_v14
+      - name: Run conformance
+        run: ./trucompute_balanced_v14 selftest
+      - name: Run projection demo
+        run: ./trucompute_balanced_v14 demo
