@@ -143,7 +143,7 @@ This fixture is deliberately repetitive and is not a Hutter result. It only veri
 Workflow:
 
 ```
-.github/workflows/trupute-eis206-mixed-field-v21.yml
+.github/workflows/trucompute-eis206-mixed-field-v21.yml
 ```
 
 The workflow downloads canonical enwik9, extracts a prefix, then requires:
@@ -188,3 +188,40 @@ It does not claim that two-node transitions create information for free. Once th
 ```
 trucompute/trucompute_eis206_mixed_field_v21.py
 ```
+
+
+## Secondary local text fixture
+
+A 65,536-byte real Python-source fixture was used as a less repetitive structured-text control.
+
+Measured contextual field statistics:
+
+```
+source bytes: 65,536
+alphabet symbols: 95
+unchanged whole-field compositions: 14,622
+changed compositions: 50,914
+TC no-change RLE bytes: 55,191
+```
+
+Equivalent entropy-coder comparison:
+
+```
+direct zlib: 16,268 bytes
+TC events + zlib: 16,393 bytes
+
+direct LZMA: 15,352 bytes
+TC events + LZMA: 15,492 bytes
+```
+
+So the native field transition representation removed about 15.8% by itself on this fixture, but the transformed stream was slightly worse than the original input once the same mature entropy coder was applied.
+
+A 4,096-byte subset was also rendered through the actual all-206-node mixed waveform:
+
+```
+mixed payload bytes: 4,194,304
+all 206 carriers present per frame: YES
+FFT listener exact: PASS
+```
+
+This is a local engineering control, not an enwik9 or Hutter score.
