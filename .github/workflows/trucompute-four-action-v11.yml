@@ -1,0 +1,34 @@
+name: TruCompute four-action node v11
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_four_action_v11.hpp'
+      - 'experiments/trucompute_four_action_v11_test.cpp'
+      - 'docs/TRUCOMPUTE_FOUR_ACTION_NODE_v11.0.md'
+      - '.github/workflows/trucompute-four-action-v11.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_four_action_v11_test.cpp -o four_action_v11
+      - name: Four-action conformance
+        run: |
+          ./four_action_v11 | tee four_action.log
+          grep -q '^TRUCOMPUTE_FOUR_ACTION_NODE_V11=PASS$' four_action.log
+          grep -q '^native_action_count=4$' four_action.log
+          grep -q '^host_encoding_bits=2$' four_action.log
+          grep -q '^action_00=NEITHER$' four_action.log
+          grep -q '^action_01=NEG$' four_action.log
+          grep -q '^action_10=BOTH$' four_action.log
+          grep -q '^action_11=POS$' four_action.log
+          grep -q '^off_action=NEITHER$' four_action.log
+          grep -q '^powered_unobserved_action=BOTH$' four_action.log
+          grep -q '^observed_actions=NEG_OR_POS$' four_action.log
+          grep -q '^observation_mutates_imprint=false$' four_action.log
+          grep -q '^page_response_table=false$' four_action.log
+          grep -q '^character_response_table=false$' four_action.log
