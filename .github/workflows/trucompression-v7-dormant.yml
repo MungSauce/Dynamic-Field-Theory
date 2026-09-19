@@ -1,0 +1,70 @@
+name: TruCompression v7 dormant-imprint conformance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_runtime_v3.hpp'
+      - 'trucompression/trucompression_hmc_v7.cpp'
+      - 'docs/TRUCOMPRESSION_DORMANT_IMPRINT_ARCHITECTURE_v3.0.md'
+      - '.github/workflows/trucompression-v7-dormant.yml'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install reference codec dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y zlib1g-dev
+
+      - name: Build
+        run: g++ -O3 -std=c++17 trucompression/trucompression_hmc_v7.cpp -lz -o trucompression_v7
+
+      - name: Self-test
+        run: |
+          ./trucompression_v7 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_V3_CONFORMANCE=PASS$' selftest.log
+          grep -q '^TRUCOMPRESSION_DORMANT_V7=PASS$' selftest.log
+          grep -q '^persistent_selector_configurations=0$' selftest.log
+          grep -q '^persistent_page_banks=0$' selftest.log
+
+      - name: Build two-page source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          n=1_010_000
+          data=(b"alpha beta gamma delta\n"*50000)
+          Path("source.bin").write_bytes((data*((n+len(data)-1)//len(data)))[:n])
+          PY
+          sha256sum source.bin > source.sha
+
+      - name: Freeze one dormant imprint
+        run: |
+          ./trucompression_v7 freeze source.bin source.truc | tee freeze.log
+          grep -q '^persistent_selector_configurations=0$' freeze.log
+          grep -q '^persistent_page_banks=0$' freeze.log
+          test "$(stat -c%s source.truc)" -lt "$(stat -c%s source.bin)"
+
+      - name: Remove source
+        run: |
+          rm source.bin
+          test ! -e source.bin
+
+      - name: Source-isolated replay through generic HMC runner
+        run: |
+          ./trucompression_v7 replay source.truc recovered.bin --strict-first-page | tee replay.log
+          test "$(sha256sum recovered.bin | awk '{print $1}')" = "$(awk '{print $1}' source.sha)"
+          grep -q '^status=SOURCE_ISOLATED_REPLAY_PASS$' replay.log
+          grep -q '^persistent_selector_configurations=0$' replay.log
+          grep -q '^power_cycles=1$' replay.log
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompression-v7-dormant-conformance
+          path: |
+            selftest.log
+            freeze.log
+            replay.log
