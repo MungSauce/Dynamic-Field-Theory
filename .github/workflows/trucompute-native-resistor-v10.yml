@@ -1,0 +1,125 @@
+name: TruCompute native resistor field v10
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/trucompute_native_resistor_v10.hpp'
+      - 'experiments/trucompute_native_resistor_v10_test.cpp'
+      - 'docs/TRUCOMPUTE_NATIVE_RESISTOR_FIELD_v10.0.md'
+      - '.github/workflows/trucompute-native-resistor-v10.yml'
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: g++ -O3 -std=c++17 experiments/trucompute_native_resistor_v10_test.cpp -o resistor_v10
+
+      - name: Native resistor primitive conformance
+        run: |
+          ./resistor_v10 selftest | tee selftest.log
+          grep -q '^TRUCOMPUTE_NATIVE_RESISTOR_V10=PASS$' selftest.log
+          grep -q '^node_native_primitive=CONDITION_SENSITIVE_RESISTOR$' selftest.log
+          grep -q '^node_unresolved_condition=BOTH$' selftest.log
+          grep -q '^page_response_table=false$' selftest.log
+          grep -q '^character_response_table=false$' selftest.log
+          grep -q '^fixed_imprint_channels=8$' selftest.log
+          grep -q '^observation_mutates_imprint=false$' selftest.log
+
+      - name: Build representable four-page and eight-page fixtures
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          POS=64
+          def make(pages):
+              out=[]
+              for q in range(pages):
+                  for pos in range(POS):
+                      base=pos % 100
+                      slope=(pos % 7)+1
+                      value=base+slope*q
+                      assert value < 206
+                      out.append(value)
+              return bytes(out)
+          Path("source4.bin").write_bytes(make(4))
+          Path("source8.bin").write_bytes(make(8))
+          PY
+          test "$(stat -c%s source4.bin)" = "256"
+          test "$(stat -c%s source8.bin)" = "512"
+          sha256sum source4.bin > source4.sha
+          sha256sum source8.bin > source8.sha
+
+      - name: Freeze four pages
+        run: |
+          ./resistor_v10 freeze source4.bin field4.tru | tee freeze4.log
+          grep -q '^status=NATIVE_RESISTOR_FIELD_FROZEN$' freeze4.log
+          grep -q '^page_response_table=false$' freeze4.log
+          grep -q '^character_response_table=false$' freeze4.log
+          grep -q '^residual_bytes=0$' freeze4.log
+
+      - name: Freeze eight pages into same fixed-size node architecture
+        run: |
+          ./resistor_v10 freeze source8.bin field8.tru | tee freeze8.log
+          grep -q '^status=NATIVE_RESISTOR_FIELD_FROZEN$' freeze8.log
+          grep -q '^pages=8$' freeze8.log
+          grep -q '^fixed_imprint_channels=8$' freeze8.log
+          test "$(stat -c%s field4.tru)" = "$(stat -c%s field8.tru)"
+          echo "artifact_size_independent_of_imprinted_page_count=PASS" | tee fixed_size.log
+
+      - name: Delete sources and cold replay
+        run: |
+          rm source4.bin source8.bin
+          test ! -e source4.bin
+          test ! -e source8.bin
+          ./resistor_v10 replay field4.tru recovered4.bin | tee replay4.log
+          ./resistor_v10 replay field8.tru recovered8.bin | tee replay8.log
+          test "$(sha256sum recovered4.bin | awk '{print $1}')" = "$(awk '{print $1}' source4.sha)"
+          test "$(sha256sum recovered8.bin | awk '{print $1}')" = "$(awk '{print $1}' source8.sha)"
+          grep -q '^status=NATIVE_RESISTOR_EXACT_REPLAY_PASS$' replay4.log
+          grep -q '^status=NATIVE_RESISTOR_EXACT_REPLAY_PASS$' replay8.log
+
+      - name: Prove fixed capacity does not grow
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          POS=64
+          pages=9
+          out=[]
+          for q in range(pages):
+              for pos in range(POS):
+                  base=pos % 100
+                  slope=(pos % 7)+1
+                  value=base+slope*q
+                  if q==8 and pos==0:
+                      value += 1
+                  assert value < 206
+                  out.append(value)
+          Path("source9_fail.bin").write_bytes(bytes(out))
+          PY
+          set +e
+          ./resistor_v10 freeze source9_fail.bin should_not_exist.tru | tee capacity.log
+          rc=\${PIPESTATUS[0]}
+          set -e
+          test "$rc" = "2"
+          grep -q '^status=CAPACITY_EXCEEDED' capacity.log
+          grep -q 'artifact_created=false' capacity.log
+          test ! -e should_not_exist.tru
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trucompute-native-resistor-v10
+          path: |
+            selftest.log
+            freeze4.log
+            freeze8.log
+            replay4.log
+            replay8.log
+            fixed_size.log
+            capacity.log
+            source4.sha
+            source8.sha
