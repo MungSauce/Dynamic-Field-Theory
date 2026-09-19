@@ -13,3 +13,5 @@ Build the freestanding kernel:
 `make kernel`
 
 The GitHub Actions workflow additionally constructs a GRUB ISO, boots it under QEMU, and requires `QOS_BOOT_CONFORMANCE=PASS` from the independent kernel.
+
+Q programs are separate QBIN modules. The reference ISO loads `boot.qbin` beside the kernel rather than compiling program geometry into the kernel image.
