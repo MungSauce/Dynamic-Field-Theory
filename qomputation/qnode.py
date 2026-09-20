@@ -2,15 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .qstate import QFormation
+
 WIDTH = 256
 HEIGHT = 256
 POSITIONS = WIDTH * HEIGHT
-ACTIVE_BYTES = POSITIONS // 4      # four 2-bit Q formations per host byte
-ALLOC_BYTES = POSITIONS // 8       # one allocation bit per position
+ACTIVE_BYTES = POSITIONS // 4
+ALLOC_BYTES = POSITIONS // 8
 
 
 def relation_index(x: int, y: int) -> int:
-    x = int(x); y = int(y)
+    x = int(x)
+    y = int(y)
     if not 0 <= x < WIDTH or not 0 <= y < HEIGHT:
         raise IndexError((x, y))
     return y * WIDTH + x
@@ -25,15 +28,7 @@ def relation_xy(index: int) -> tuple[int, int]:
 
 @dataclass
 class QNode256:
-    """
-    Fixed 256x256 native node.
-
-    Host representation is an implementation detail:
-      - 2 bits per active Q formation
-      - 1 allocation bit per position
-
-    Native semantics remain 65,536 Q positions, not a byte array.
-    """
+    """Fixed 256x256 native Q-position node."""
     active: bytearray
     allocated: bytearray
 
@@ -45,7 +40,6 @@ class QNode256:
     def origin(cls) -> "QNode256":
         node = cls.void()
         node.allocated[:] = b"\xff" * ALLOC_BYTES
-        # QState.PRIMED_ZERO host code is 01. Repeated four times => 0b01010101.
         node.active[:] = b"\x55" * ACTIVE_BYTES
         return node
 
@@ -58,38 +52,40 @@ class QNode256:
         if value:
             self.allocated[b] |= mask
         else:
-            self.allocated[b] &= (~mask) & 0xff
+            self.allocated[b] &= (~mask) & 0xFF
 
     def is_allocated(self, x: int, y: int) -> bool:
         return self._alloc_get(relation_index(x, y))
 
-    def allocate(self, x: int, y: int, host_code: int = 0b01) -> None:
+    def allocate(
+        self,
+        x: int,
+        y: int,
+        formation: QFormation = QFormation.PRIMED_ZERO,
+    ) -> None:
         i = relation_index(x, y)
         self._alloc_set(i, True)
-        self.set_code(x, y, host_code)
+        self.set_formation(x, y, formation)
 
     def deallocate(self, x: int, y: int) -> None:
-        i = relation_index(x, y)
-        self._alloc_set(i, False)
+        self._alloc_set(relation_index(x, y), False)
 
-    def get_code(self, x: int, y: int) -> int:
+    def get_formation(self, x: int, y: int) -> QFormation:
         i = relation_index(x, y)
         if not self._alloc_get(i):
             raise ValueError("structural VOID")
         shift = (i & 3) * 2
-        return (self.active[i >> 2] >> shift) & 0b11
+        return QFormation((self.active[i >> 2] >> shift) & 0b11)
 
-    def set_code(self, x: int, y: int, code: int) -> None:
+    def set_formation(self, x: int, y: int, formation: QFormation) -> None:
         i = relation_index(x, y)
         if not self._alloc_get(i):
             raise ValueError("structural VOID")
-        code = int(code)
-        if not 0 <= code <= 3:
-            raise ValueError("Q formation host code must be 0..3")
+        code = int(QFormation(formation))
         b = i >> 2
         shift = (i & 3) * 2
         mask = 0b11 << shift
-        self.active[b] = (self.active[b] & (~mask & 0xff)) | (code << shift)
+        self.active[b] = (self.active[b] & (~mask & 0xFF)) | (code << shift)
 
     @property
     def allocated_count(self) -> int:
@@ -104,11 +100,11 @@ class QNode256:
         if self.is_void:
             return False
         for i in range(POSITIONS):
-            if self._alloc_get(i):
-                shift = (i & 3) * 2
-                code = (self.active[i >> 2] >> shift) & 0b11
-                if code != 0b01:
-                    return False
+            if not self._alloc_get(i):
+                continue
+            shift = (i & 3) * 2
+            if ((self.active[i >> 2] >> shift) & 0b11) != int(QFormation.PRIMED_ZERO):
+                return False
         return True
 
     def clone(self) -> "QNode256":
