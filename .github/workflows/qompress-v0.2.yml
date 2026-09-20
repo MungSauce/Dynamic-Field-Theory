@@ -1,0 +1,22 @@
+name: Qompress v0.2 Reflex Conformance
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - qompress-v0.2-reflex-20260919
+    paths:
+      - "qompress/**"
+      - ".github/workflows/qompress-v0.2.yml"
+
+jobs:
+  reflex-conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run Qompress v0.2 reflex conformance
+        run: python qompress/tests/test_reflex_v2.py
