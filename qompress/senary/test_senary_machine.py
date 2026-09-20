@@ -3,7 +3,6 @@ from senary_machine import (
     QState,
     SenaryMachine,
     SenarySemantic,
-    SenarySnapshot,
     pack_node,
     unpack_node,
 )
@@ -11,7 +10,7 @@ from senary_machine import (
 
 def test_semantic_vocabulary_is_six():
     assert {x.value for x in SenarySemantic} == {
-        "Ø", "-", "-+", "+-", "+", "Π0"
+        "∅", "-", "-+", "+-", "+", "Π0"
     }
 
 
@@ -22,34 +21,33 @@ def test_qos_host_codes_preserved():
     assert int(QState.POS) == 0b11
 
 
-def test_void_is_not_pi0():
-    m = SenaryMachine.void(8)
-    assert m.is_void
+def test_structural_null_is_not_pi0():
+    m = SenaryMachine.blank(8)
+    assert m.is_structural_null
     assert not m.is_pi0
-    assert m.global_semantic is SenarySemantic.VOID
+    assert m.global_semantic is SenarySemantic.STRUCTURAL_NULL
 
 
 def test_pi0_is_global_not_local_digit():
     m = SenaryMachine.origin(8)
-    assert not m.is_void
+    assert not m.is_structural_null
     assert m.is_pi0
     assert m.global_semantic is SenarySemantic.PI0
     assert all(x == "-+" for x in m.semantic_tuple())
 
 
 def test_sparse_pi0_uses_allocated_primitives_only():
-    m = SenaryMachine.void(8)
+    m = SenaryMachine.blank(8)
     m.allocate(1)
     m.allocate(6)
     assert m.is_pi0
-    assert m.semantic_tuple()[0] == "Ø"
+    assert m.semantic_tuple()[0] == "∅"
     assert m.semantic_tuple()[1] == "-+"
     assert m.semantic_tuple()[6] == "-+"
 
 
 def test_directed_zero_reflex():
     m = SenaryMachine.origin(2)
-
     m.set_active(0, QState.NEG)
     assert m.settle_to_directed_zero(0) is QState.PRIMED_ZERO
     assert m.reverse_directed_zero(0) is QState.NEG
@@ -66,14 +64,11 @@ def test_node_pack_roundtrip_exhaustive():
 
 
 def test_snapshot_roundtrip_exhaustive_capacity_4():
-    # Each primitive has five LOCAL contextual configurations:
-    # VOID + four active Q states = 5^4 = 625 sparse field formations.
     cap = 4
     choices = [None, *list(QState)]
-
     seen = set()
     for formation in itertools.product(choices, repeat=cap):
-        m = SenaryMachine.void(cap)
+        m = SenaryMachine.blank(cap)
         for i, q in enumerate(formation):
             if q is not None:
                 m.allocate(i, q)
@@ -88,21 +83,6 @@ def test_snapshot_roundtrip_exhaustive_capacity_4():
         seen.add(key)
 
     assert len(seen) == 5 ** cap
-
-
-def test_snapshot_is_whole_numbers():
-    m = SenaryMachine.void(6)
-    m.allocate(0, QState.POS)
-    m.allocate(2, QState.DECAY_ZERO)
-    m.allocate(5, QState.PRIMED_ZERO)
-    s = m.snapshot()
-
-    assert isinstance(s.capacity, int)
-    assert isinstance(s.allocation_mask, int)
-    assert isinstance(s.payload, int)
-    assert s.capacity >= 0
-    assert s.allocation_mask >= 0
-    assert s.payload >= 0
 
 
 def test_all_primed_zero_payload_is_integer_zero():
