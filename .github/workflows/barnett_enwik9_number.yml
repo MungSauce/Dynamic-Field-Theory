@@ -1,0 +1,19 @@
+name: Barnett enwik9 numeric target
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/enwik9_207_button_number.py
+      - .github/workflows/barnett_enwik9_number.yml
+  workflow_dispatch:
+jobs:
+  number:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 experiments/enwik9_207_button_number.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: enwik9-207-button-number-report
+          path: enwik9_button_number_report.json
