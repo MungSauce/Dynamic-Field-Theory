@@ -1,0 +1,43 @@
+name: Module1 exact enwik9 seed metrics
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/module1-enwik9.yml'
+jobs:
+  module1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch canonical enwik9 and run Module 1
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          python3 - <<'PY'
+          import zipfile,hashlib,json
+          EXPECT="159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc"
+          with zipfile.ZipFile("enwik9.zip") as z:
+            f=z.open("enwik9")
+            h=hashlib.sha256(); seen=set(); counts=[0]*256; n=0
+            while True:
+              b=f.read(8<<20)
+              if not b: break
+              h.update(b); n+=len(b)
+              for x in b: counts[x]+=1; seen.add(x)
+          assert n==1_000_000_000 and h.hexdigest()==EXPECT
+          alphabet=sorted(seen)
+          assert len(alphabet)==206
+          beta={b:i+1 for i,b in enumerate(alphabet)}
+          label_digits=sum(counts[b]*len(str(beta[b])) for b in alphabet)
+          sep_digits=3*(n-1)
+          total=label_digits+sep_digits
+          report={"source_bytes":n,"source_sha256":h.hexdigest(),"distinct_symbols":len(alphabet),
+                  "mapping":"ascending byte value -> labels 1..206","separator":207,"trailing_separator":False,
+                  "label_digits":label_digits,"separator_digits":sep_digits,"module1_seed_digits":total,
+                  "module1_ascii_GB":total/1e9}
+          print(json.dumps(report,indent=2))
+          open("module1_enwik9_report.json","w").write(json.dumps(report,indent=2)+"\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: module1-enwik9-report
+          path: module1_enwik9_report.json
