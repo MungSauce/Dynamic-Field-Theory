@@ -70,6 +70,16 @@ jobs:
           # D3 is exactly D1 under two anchors + second relational differences.
           # This records the lawful operator/anchor overhead before any claim of further reduction.
           n=r["source_bytes"]
+          # Qalqulus NCL candidate search: exact block relational reuse.
+          # Search repeated blocks at multiple powers of two; a candidate counts
+          # dictionary symbols + exact block-id stream + tail + fixed metadata.
+          A_bytes=bytes(range(1))  # accounting marker; source trajectory remains in q.py
+          block_results=[]
+          # Conservative analytical gate here: no target-dependent decoder and no
+          # reduction claim unless an executable candidate reconstructs exactly.
+          for bs in (16,64,256,1024,4096,16384):
+            block_results.append({"block_symbols":bs,"status":"PENDING_EXECUTABLE_GATE"})
+          r["ncl_candidate_search"]=block_results
           r["first_reduction"]={
             "D1_symbols":n,
             "D2_residual_symbols":n-1,
