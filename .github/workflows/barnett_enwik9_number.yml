@@ -5,6 +5,8 @@ on:
     paths:
       - experiments/enwik9_207_button_number.py
       - .github/workflows/barnett_enwik9_number.yml
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 jobs:
   number:
