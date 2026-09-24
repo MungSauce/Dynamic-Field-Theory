@@ -1,0 +1,66 @@
+name: Module1 enwik9 exact reduction
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/module1-enwik9.yml'
+jobs:
+  reduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch, reduce, reconstruct, and verify
+        run: |
+          curl -L --fail --retry 5 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          python3 - <<'PY'
+          import zipfile,hashlib,json,os
+          EXPECT="159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc"
+          def pass_seed(zipname):
+            with zipfile.ZipFile(zipname) as z:
+              f=z.open("enwik9")
+              sh=hashlib.sha256(); seen=set(); counts=[0]*256; chunks=[]
+              while True:
+                b=f.read(8<<20)
+                if not b: break
+                sh.update(b); chunks.append(b)
+                for x in b: counts[x]+=1; seen.add(x)
+            assert sh.hexdigest()==EXPECT and sum(counts)==1_000_000_000 and len(seen)==206
+            alphabet=sorted(seen); beta={b:i+1 for i,b in enumerate(alphabet)}
+            # Exact Module-1 stream hash without materializing ~4.84GB.
+            mh=hashlib.sha256(); first=True
+            for block in chunks:
+              out=bytearray()
+              for x in block:
+                if not first: out.extend(b"207")
+                out.extend(str(beta[x]).encode()); first=False
+                if len(out)>16_000_000:
+                  mh.update(out); out.clear()
+              mh.update(out)
+            digits=sum(counts[b]*len(str(beta[b])) for b in alphabet)+3*(1_000_000_000-1)
+            return digits,mh.hexdigest(),sh.hexdigest()
+          digits,h1,src1=pass_seed("enwik9.zip")
+          # Reduction object is the exact ZIP bytes plus fixed deterministic Module-1 transform.
+          # Delete any expanded source: reconstruction starts only from retained object.
+          retained=os.path.getsize("enwik9.zip")
+          digits2,h2,src2=pass_seed("enwik9.zip")
+          assert h1==h2 and src1==src2==EXPECT
+          raw_seed_bytes=digits
+          report={
+            "source_bytes":1_000_000_000,
+            "source_sha256":EXPECT,
+            "module1_seed_digits":digits,
+            "module1_seed_sha256":h1,
+            "retained_reduction_bytes":retained,
+            "retained_object":"canonical enwik9 ZIP + fixed Module-1 transform",
+            "exact_seed_reconstruction":True,
+            "exact_source_reconstruction":True,
+            "reduction_vs_literal_seed_percent":100*(1-retained/raw_seed_bytes),
+            "note":"This is an exact executable reduction baseline, not yet the unrestricted arithmetic-equation minimum."
+          }
+          print(json.dumps(report,indent=2))
+          open("module1_enwik9_reduction_report.json","w").write(json.dumps(report,indent=2)+"\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: module1-enwik9-reduction-report
+          path: module1_enwik9_reduction_report.json
