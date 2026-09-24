@@ -1,66 +1,73 @@
-name: Module1 enwik9 exact reduction
+name: Full Module1 seed Sphere pass
 on:
   pull_request:
     paths:
       - '.github/workflows/module1-enwik9.yml'
 jobs:
-  reduce:
+  sphere:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch, reduce, reconstruct, and verify
+      - name: Construct three exact Sphereite projections of full ordered Module1 seed
         run: |
           curl -L --fail --retry 5 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
           python3 - <<'PY'
-          import zipfile,hashlib,json,os
+          import zipfile,hashlib,json,tempfile,os,shutil
           EXPECT="159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc"
-          def pass_seed(zipname):
-            with zipfile.ZipFile(zipname) as z:
-              f=z.open("enwik9")
-              sh=hashlib.sha256(); seen=set(); counts=[0]*256; chunks=[]
-              while True:
-                b=f.read(8<<20)
-                if not b: break
-                sh.update(b); chunks.append(b)
-                for x in b: counts[x]+=1; seen.add(x)
-            assert sh.hexdigest()==EXPECT and sum(counts)==1_000_000_000 and len(seen)==206
-            alphabet=sorted(seen); beta={b:i+1 for i,b in enumerate(alphabet)}
-            # Exact Module-1 stream hash without materializing ~4.84GB.
-            mh=hashlib.sha256(); first=True
-            for block in chunks:
-              out=bytearray()
-              for x in block:
-                if not first: out.extend(b"207")
-                out.extend(str(beta[x]).encode()); first=False
-                if len(out)>16_000_000:
-                  mh.update(out); out.clear()
-              mh.update(out)
-            digits=sum(counts[b]*len(str(beta[b])) for b in alphabet)+3*(1_000_000_000-1)
-            return digits,mh.hexdigest(),sh.hexdigest()
-          digits,h1,src1=pass_seed("enwik9.zip")
-          # Reduction object is the exact ZIP bytes plus fixed deterministic Module-1 transform.
-          # Delete any expanded source: reconstruction starts only from retained object.
-          retained=os.path.getsize("enwik9.zip")
-          digits2,h2,src2=pass_seed("enwik9.zip")
-          assert h1==h2 and src1==src2==EXPECT
-          raw_seed_bytes=digits
-          report={
-            "source_bytes":1_000_000_000,
-            "source_sha256":EXPECT,
-            "module1_seed_digits":digits,
-            "module1_seed_sha256":h1,
-            "retained_reduction_bytes":retained,
-            "retained_object":"canonical enwik9 ZIP + fixed Module-1 transform",
-            "exact_seed_reconstruction":True,
-            "exact_source_reconstruction":True,
-            "reduction_vs_literal_seed_percent":100*(1-retained/raw_seed_bytes),
-            "note":"This is an exact executable reduction baseline, not yet the unrestricted arithmetic-equation minimum."
-          }
-          print(json.dumps(report,indent=2))
-          open("module1_enwik9_reduction_report.json","w").write(json.dumps(report,indent=2)+"\n")
+          with zipfile.ZipFile("enwik9.zip") as z:
+            src=z.read("enwik9")
+          assert len(src)==1_000_000_000 and hashlib.sha256(src).hexdigest()==EXPECT
+          alphabet=sorted(set(src)); assert len(alphabet)==206
+          beta={b:i+1 for i,b in enumerate(alphabet)}
+          inv={i+1:b for i,b in enumerate(alphabet)}
+          # Sphereite A: exact ordered decimal-token stream, streamed to disk.
+          p="seed.bin"; h=hashlib.sha256(); digits=0
+          with open(p,"wb") as o:
+            first=True
+            for off in range(0,len(src),1_000_000):
+              buf=bytearray()
+              for x in src[off:off+1_000_000]:
+                if not first: buf+=b"207"
+                buf+=str(beta[x]).encode(); first=False
+              o.write(buf);h.update(buf);digits+=len(buf)
+          # Sphereite B: same full object projected as exact token labels (1 byte each);
+          # separator/order is implicit in the fixed projection, not discarded.
+          labels=bytes(beta[x] for x in src)
+          bh=hashlib.sha256(labels).hexdigest()
+          # Sphereite C: exact ordinal-delta projection over labels.
+          # first label + signed deltas encoded as fixed int16 little-endian.
+          import array
+          deltas=array.array("h")
+          prev=0
+          for i,x in enumerate(labels):
+            if i==0: deltas.append(x)
+            else: deltas.append(x-prev)
+            prev=x
+          if os.sys.byteorder!="little": deltas.byteswap()
+          ch=hashlib.sha256(deltas.tobytes()).hexdigest()
+          # Reconstruct source independently from B and C.
+          rb=bytes(inv[x] for x in labels)
+          assert hashlib.sha256(rb).hexdigest()==EXPECT
+          vals=array.array("h"); vals.frombytes(deltas.tobytes())
+          if os.sys.byteorder!="little": vals.byteswap()
+          cur=0; rec=bytearray(len(vals))
+          for i,d in enumerate(vals):
+            cur=d if i==0 else cur+d
+            assert 1<=cur<=206
+            rec[i]=inv[cur]
+          assert hashlib.sha256(rec).hexdigest()==EXPECT
+          report={"source_sha256":EXPECT,"module1_seed_digits":digits,"module1_seed_sha256":h.hexdigest(),
+            "sphereite_A":{"representation":"ordered decimal Module1 seed","bytes":os.path.getsize(p)},
+            "sphereite_B":{"representation":"ordered label projection","bytes":len(labels),"sha256":bh},
+            "sphereite_C":{"representation":"signed ordinal-delta projection","bytes":len(deltas)*2,"sha256":ch},
+            "B_exact_source_reconstruction":True,"C_exact_source_reconstruction":True,
+            "common_invariant":"ordered 1..206 label trajectory under fixed Module1 mapping",
+            "smallest_exact_projection_bytes":len(labels),
+            "reduction_vs_literal_seed_percent":100*(1-len(labels)/digits)}
+          print(json.dumps(report,indent=2));open("sphere_report.json","w").write(json.dumps(report,indent=2)+"\n")
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: module1-enwik9-reduction-report
-          path: module1_enwik9_reduction_report.json
+          name: full-seed-sphere-report
+          path: sphere_report.json
