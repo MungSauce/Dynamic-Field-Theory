@@ -65,6 +65,21 @@ jobs:
           def grab(label):
             m=re.search(re.escape(label)+r":\s*(.+)",t); return m.group(1).strip() if m else None
           r=json.load(open("qalqulus_d1_d3.json"))
+          # First executable NCL/common-ground accounting.
+          # D2 is exactly D1 under one anchor + first relational differences.
+          # D3 is exactly D1 under two anchors + second relational differences.
+          # This records the lawful operator/anchor overhead before any claim of further reduction.
+          n=r["source_bytes"]
+          r["first_reduction"]={
+            "D1_symbols":n,
+            "D2_residual_symbols":n-1,
+            "D2_anchor_symbols":1,
+            "D3_residual_symbols":n-2,
+            "D3_anchor_symbols":2,
+            "shared_invertible_relation":"finite-difference trajectory modulo 206",
+            "status":"UNRESOLVED",
+            "reason":"MaxInv/NCL residual minimization has not yet produced a strictly smaller exact retained description"
+          }
           r["resource_usage"]={
             "wall_clock":grab("Elapsed (wall clock) time (h:mm:ss or m:ss)"),
             "user_cpu_seconds":grab("User time (seconds)"),
