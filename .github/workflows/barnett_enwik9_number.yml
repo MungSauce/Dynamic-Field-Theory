@@ -2,6 +2,8 @@ name: Barnett enwik9 numeric target
 on:
   push:
     branches: [barnett-enwik9-number-20260924]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 jobs:
   number:
