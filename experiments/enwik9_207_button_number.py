@@ -46,3 +46,5 @@ report={
 }
 open("enwik9_button_number_report.json","w").write(json.dumps(report,indent=2)+"\n")
 print(json.dumps(report,indent=2))
+
+# trigger after workflow activation on default branch
