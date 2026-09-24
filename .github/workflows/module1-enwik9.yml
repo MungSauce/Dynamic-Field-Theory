@@ -1,44 +1,65 @@
-name: Module1 zero-separator symbolic Sphere
+name: Qalqulus D1-D3 Sphere orientations
 on:
   pull_request:
     paths:
       - '.github/workflows/module1-enwik9.yml'
 jobs:
-  sphere:
+  qalqulus:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Module1 zero separator and symbolic Sphere math
+      - name: Derive and gate D1 D2 D3 orientations
         run: |
           curl -L --fail --retry 5 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
-          python3 - <<'PY'
+          cat > /tmp/q.py <<'PY'
           import zipfile,hashlib,json
           EXPECT="159b85351e5f76e60cbe32e04c677847a9ecba3adc79addab6f4c6c7aa3744bc"
           with zipfile.ZipFile("enwik9.zip") as z:
-            f=z.open("enwik9"); h=hashlib.sha256(); counts=[0]*256; seen=set(); n=0
-            while True:
-              b=f.read(8<<20)
-              if not b: break
-              h.update(b); n+=len(b)
-              for x in b: counts[x]+=1; seen.add(x)
-          assert n==1_000_000_000 and h.hexdigest()==EXPECT and len(seen)==206
-          alphabet=sorted(seen); beta={b:i+1 for i,b in enumerate(alphabet)}
-          label_digits=sum(counts[b]*len(str(beta[b])) for b in alphabet)
-          seed_digits=label_digits+(n-1) # separator 0 = one digit
-          # Mathematical Sphere: the full ordered numerical seed N is the operand;
-          # do not expand N into a second physical representation.
-          sphere={"V":"N (full ordered Module1 zero-separated numerical seed)",
-                  "E":"ordinal adjacency / separator-delimited label relations",
-                  "H":"recursive relations over the ordered trajectory",
-                  "C":["labels 1..206","separator 0","exact order","fixed ascending-byte mapping"],
-                  "F":"recursively accessible sub-trajectories"}
-          report={"source_bytes":n,"source_sha256":h.hexdigest(),"distinct_symbols":206,
-                  "separator":0,"label_digits":label_digits,"module1_seed_digits":seed_digits,
-                  "sphere":sphere,"sphere_construction":"symbolic_exact_operand","physical_sphere_expansion_bytes":0}
-          print(json.dumps(report,indent=2));open("zero_separator_sphere_report.json","w").write(json.dumps(report,indent=2)+"\n")
+            src=z.read("enwik9")
+          assert hashlib.sha256(src).hexdigest()==EXPECT and len(src)==1_000_000_000
+          alphabet=sorted(set(src)); assert len(alphabet)==206
+          enc=bytes.maketrans(bytes(alphabet),bytes(range(1,207)))
+          labels=src.translate(enc)
+          n=len(labels)
+          # Qalqulus dimensions: D1 element/order; D2 pairwise relation; D3 relation-of-relations.
+          # Work modulo 206 so each transform is closed on one byte and exactly invertible.
+          A=labels
+          B=bytearray(n); B[0]=A[0]
+          mv=memoryview(A)
+          for off in range(1,n,8_000_000):
+            end=min(n,off+8_000_000)
+            # pairwise change encoded 0..205
+            B[off:end]=bytes(((A[i]-A[i-1])%206 for i in range(off,end)))
+          C=bytearray(n); C[0]=B[0]
+          if n>1: C[1]=B[1]
+          for off in range(2,n,8_000_000):
+            end=min(n,off+8_000_000)
+            C[off:end]=bytes(((B[i]-B[i-1])%206 for i in range(off,end)))
+          # exact inverse gates
+          rb=bytearray(n); rb[0]=B[0]
+          for i in range(1,n): rb[i]=((rb[i-1]-1+B[i])%206)+1
+          rcB=bytearray(n); rcB[0]=C[0]
+          if n>1: rcB[1]=C[1]
+          for i in range(2,n): rcB[i]=(rcB[i-1]+C[i])%206
+          rc=bytearray(n); rc[0]=rcB[0]
+          for i in range(1,n): rc[i]=((rc[i-1]-1+rcB[i])%206)+1
+          gateB=(rb==A); gateC=(rc==A)
+          assert gateB and gateC
+          label_digits=sum(len(str(x)) for x in A)
+          seed_digits=label_digits+n-1
+          report={
+            "source_bytes":n,"separator":0,"module1_seed_digits":seed_digits,
+            "orientation_A":{"dimension":"D1","meaning":"element/order trajectory","symbols":n,"sha256":hashlib.sha256(A).hexdigest()},
+            "orientation_B":{"dimension":"D2","meaning":"anchor + pairwise modular relational change","symbols":n,"sha256":hashlib.sha256(B).hexdigest(),"exact_inverse":gateB},
+            "orientation_C":{"dimension":"D3","meaning":"anchors + change-between-pairwise-changes","symbols":n,"sha256":hashlib.sha256(C).hexdigest(),"exact_inverse":gateC},
+            "common_relational_object":"same length-n ordered trajectory under invertible first/second relational-difference transforms",
+            "next_operation":"NCL each orientation, then MaxInv(Common), Delta, Sigma, Omega, recurse"
+          }
+          print(json.dumps(report,indent=2)); open("qalqulus_d1_d3.json","w").write(json.dumps(report,indent=2)+"\n")
           PY
+          python3 /tmp/q.py
       - uses: actions/upload-artifact@v4
         with:
-          name: zero-separator-symbolic-sphere-report
-          path: zero_separator_sphere_report.json
+          name: qalqulus-d1-d3
+          path: qalqulus_d1_d3.json
