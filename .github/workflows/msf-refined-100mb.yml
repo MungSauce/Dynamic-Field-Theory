@@ -1,0 +1,39 @@
+name: MSF refined 100MB composite-state validation
+
+on:
+  pull_request:
+    paths:
+      - 'validation/msf_composite_100mb.py'
+      - '.github/workflows/msf-refined-100mb.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download canonical enwik9 and extract first 100MB
+        run: |
+          curl -L --fail --retry 4 --retry-delay 5 -o enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile('enwik9.zip') as z, z.open('enwik9') as src, open('enwik100m','wb') as out:
+              left=100_000_000
+              while left:
+                  b=src.read(min(8<<20,left))
+                  if not b: raise SystemExit('unexpected EOF')
+                  out.write(b); left-=len(b)
+          PY
+          test "$(stat -c%s enwik100m)" = "100000000"
+
+      - name: Compose one-state MSF, erase source, listen, verify
+        run: python3 validation/msf_composite_100mb.py enwik100m
+
+      - name: Publish report
+        uses: actions/upload-artifact@v4
+        with:
+          name: msf-refined-100mb-report
+          path: msf_100mb_refined_report.json
+          if-no-files-found: error
