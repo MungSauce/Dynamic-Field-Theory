@@ -1,0 +1,55 @@
+name: TruCompression native v1 conformance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'trucompute/**'
+      - 'trucompression/**'
+      - 'docs/TRUCOMPRESSION_*'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          g++ -O3 -std=c++17 trucompression/trucompression_native_v1.cpp -o trucompression
+
+      - name: TruCompute and machine self-test
+        run: ./trucompression selftest
+
+      - name: Create deterministic 50K and 70K prefixes
+        run: |
+          python3 - <<'PY'
+          import random
+          from pathlib import Path
+          for n in (50_000, 70_000):
+              r = random.Random(12345)
+              Path(f"prefix{n}.bin").write_bytes(bytes(r.randrange(256) for _ in range(n)))
+          PY
+
+      - name: 50K exact freeze and replay
+        run: |
+          sha256sum prefix50000.bin > source.sha256
+          ./trucompression imprint prefix50000.bin machine.truc
+          rm prefix50000.bin
+          ./trucompression replay machine.truc recovered.bin --strict-buttons
+          REC=$(sha256sum recovered.bin | awk '{print $1}')
+          SRC=$(awk '{print $1}' source.sha256)
+          test "$REC" = "$SRC"
+          test "$(stat -c%s machine.truc)" = "125064"
+
+      - name: 70K must fail without growth under v1 law
+        run: |
+          set +e
+          ./trucompression imprint prefix70000.bin should_not_exist.truc > contradiction.log
+          RC=$?
+          set -e
+          cat contradiction.log
+          test "$RC" = "2"
+          grep -q '^status=IMPRINT_CONTRADICTION$' contradiction.log
+          grep -q '^byte=59248$' contradiction.log
+          test ! -e should_not_exist.truc
